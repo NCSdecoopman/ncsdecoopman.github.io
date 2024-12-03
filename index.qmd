@@ -1,0 +1,103 @@
+---
+title: "A propos"
+lang: fr
+---
+
+💡 Curieux de nature et passionné d'informatique, j'ai débuté l'algorithmique avec Python, avant de m'orienter vers le développement web en 
+apprenant SQL et PHP. Pendant mon doctorat en médecine vétérinaire, j'ai découvert les statistiques et l'analyse de données avec R. 
+Cette étude scientifique a conduit à une publication montrant pour la première fois les facteurs de variations communs entre la lactosémie et le 
+taux de lactose du lait.
+
+🔍 En tant que vétérinaire praticien libéral pendant 5 ans, j’ai développé une expertise transversale, combinant analyse médicale, 
+capacité de diagnostic rapide et sens de la communication. La rigueur nécessaire pour gérer des situations d'urgence, synthétiser 
+des informations complexes et prendre des décisions sous pression m’a doté d’une résilience et d'une discipline solides. 
+Cette expérience m’a également appris à comprendre les besoins des clients et à y répondre avec des solutions efficaces et bien fondées, 
+un savoir-faire essentiel pour la data science, où il est crucial d'allier compétences analytiques et capacité à communiquer des 
+résultats clairs et fiables.
+
+🎓 Suite à une réflexion professionnelle approfondie formalisée par un bilan de compétences, j'ai entrepris un Master en Statistique et Sciences 
+des Données (SSD) - Core AI MIAI à l'Université Grenoble Alpes, où je renforce mes compétences en statistiques avancées, machine learning, 
+modélisation et exploration de données textuelles et spatiales. Ce parcours me permet de maîtriser des outils comme R et Python pour 
+concevoir des solutions basées sur l’IA. Mon objectif est d’intégrer ces compétences à mon expérience de terrain pour développer des approches 
+innovantes en data science.
+
+---
+
+### Expériences professionnelles
+
+#### Docteur en médecine vétérinaire pour animaux de compagnie et animaux d’élevage
+
+Clinique vétérinaire des Dômes, Le Broc (63) - De septembre 2021 à août 2024
+
+- Résolution de problèmes variés avec une capacité d’adaptation aux situations
+- Établir des prévisions, des évaluations, des recommandations, des perspectives
+
+#### Docteur en médecine vétérinaire pour animaux d’élevage
+
+Clinique Ani-Médic, La Tardière (85) - De septembre 2019 à septembre 2021
+
+- Force d’initiatives et de propositions en animant une démarche avec informations et conseils
+- Tenir une veille scientifique
+
+#### Stage de recherche – Analyse statistique et modélisation de données
+
+Institut de recherche INRA, Le Rheu (35) - De mars 2019 à juillet 2019  
+
+- Mention très honorable avec félicitations du jury et proposition pour un prix de thèse
+- Utilisation de méthodes statistiques avancées (ANOVA, ACP, modèles linéaires à effets mixtes)
+- Travail collaboratif avec des chercheurs sur la conception et l’interprétation des résultats
+- Présentation scientifique orale et écrite des travaux de recherche
+
+#### Campagne de prophylaxie vétérinaire
+
+Clinique Ani-Médic, La Tardière (85) - Janvier 2019
+
+---
+
+### Diplômes et formations
+
+#### Master 2 Mathématiques et applications - Parcours statistique et sciences des données (SSD)
+
+[Université Grenoble Alpes (UGA)](https://www.univ-grenoble-alpes.fr/), Grenoble (38) - Depuis septembre 2024
+
+- Statistiques : tests statistiques, estimation statistique (moments, vraisemblance), régressions (linéaire, logistique), GLM, statistique computationnelle (bootstrap, permutation), statistiques en grande dimension (FWER, FDF, méthodes de pénalisation Lasso et Ridge), biostatistique (modèles mixtes, de survie)
+- Exploration de données : numériques (analyse descriptive), fouille de texte (DL, Word2Vec, NLP, BERT, Hugging Face Transformers), spatiales (krigeage)
+- Modélisation : bayésienne (Monte Carlo), échantillonnage, séries temporelles (ARIMA, GARCH)
+- Machine Learning : apprentissage supervisé (classification et régression : K-NN, SVM, Random Forests), non supervisé (clustering K-means et dimensionnalité ACP), apprentissage profond (réseaux de neurones CNN, RNN et transformers)
+- Programmation et optimisation (solveurs) :
+   - R : boot, lme4, randomForest, xgboost, ggplot2, RMarkdown
+   - Python : NumPy, pandas, SciPy, scikit-learn, TensorFlow, Keras, matplotlib, CVXPY
+
+#### Lauréat de l'Académie Vétérinaire de France - Prix de thèse et médaille
+
+[Académie Vétérinaire de France](https://academie-veterinaire-defrance.org/), Paris (75) - Novembre 2020
+
+#### Diplôme d’État de docteur vétérinaire
+
+[Ecole Nationale Vétérinaire, Agroalimentaire et de l'Alimentation](https://www.oniris-nantes.fr/), Nantes (44) - De septembre 2014 à septembre 2019
+
+#### Classes préparatoires aux Grandes Écoles (CPGE)
+
+Lycée Clemenceau, Nantes (44) - De septembre 2011 à juillet 2014
+
+---
+
+### Publications
+
+- Guinard-Flament J _et al_. Variations in milk lactose content and the mechanisms underlying in dairy cows. ADSA annual meeting 2023. American Dairy Science Association. 2023.  
+[PDF](/pdf/Flament_2023_ADSA_annual_meeting.pdf) | [hal-04419956](https://hal.inrae.fr/hal-04419956)
+
+- Decoopman N, Guinard- Flament J et Resmond R. Lactose sanguin et lactose du lait : caractérisation de leurs facteurs de variation chez la vache laitière. Bull. Acad. Vét. France. 2022.  
+[PDF](/pdf/Decoopman_2022_Bull_Acad_Vet_France.pdf) | [10.3406/bavf.2022.70978](https://www.persee.fr/doc/bavf_0001-4192_2022_num_175_1_15861) 
+
+- Guinard-Flament J, Decoopman N et Resmond R. Taux de lactose du lait et lactosémie chez la vache laitière. PEGASE - Physiologie, Environnement et Génétique pour l’Animal et les Systèmes d’Elevage. Défis scientifiques Phase. Rennes. 2019.  
+[PDF](/pdf/Flament_2019_HAL.pdf) | [hal-02737600](https://hal.science/hal-02737600)
+
+- Decoopman N. Contribution à la compréhension des variations de la lactosémie chez la vache laitière. Thèse pour le diplôme d’État de Docteur Vétérinaire, Faculté de médecine, Nantes. 2019 ; 125 pages.  
+[PDF](/pdf/Decoopman_2019_These.pdf) | [Doc-ONIRIS](https://doc-veto.oniris-nantes.fr/Record.htm?idlist=1&record=19310286124911384689)
+
+---
+
+### Loisirs
+Si je ne suis pas derrière un ordinateur, je suis probablement parti en montagne !
+⛰️🥾🚵‍♂️🧗‍♂️⛷️🪂

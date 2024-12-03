@@ -1,0 +1,42 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "NCSdecoopman"
+  navbar:
+    background: secondary
+    search: false
+    tools:
+      - icon: github
+        href:  https://github.com/ncsdecoopman/
+      - icon: linkedin
+        href:  https://www.linkedin.com/in/nicolas-decoopman/
+  sidebar:
+    style: "docked"
+    contents:
+      - text: |
+          <img src="img/profil.png" alt="Profil" style="width:160px; display:block; margin:auto; margin-bottom:20px;">
+      - text: |
+          <div style="margin-bottom:50px; text-align:center; font-weight:bold;">Data Science <br>& modélisation statistique</div>
+      - section: Programmation
+        contents:
+          - text: "R, Python, SQL"
+      - section: Compétences
+        contents:
+          - text: "Mathématiques"
+          - text: "Synthèse d’informations"
+          - text: "Prise de décision"
+          - text: "Résolution"
+          - text: "Mise en oeuvre de solutions"
+          - text: "Communication"
+          - text: "Collaboration"
+          - text: "Veille scientifique"
+          - text: "Esprit critique"
+
+format:
+  html:
+    theme:
+      light: cosmo
+    toc: true
+    css: styles.css
