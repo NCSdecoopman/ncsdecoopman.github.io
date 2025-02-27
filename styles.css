@@ -1,0 +1,213 @@
+html, body {
+  max-width: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+/* Titres : même taille pour h1, h2, h3 et h4, avec distinction visuelle */
+h1, h2, h3, h4 {
+  color: #34495e;
+  margin: 0.5em 0;
+}
+
+/* Styles distincts pour chaque titre */
+h1 {
+  font-size: 1.4em;
+  font-weight: bold;
+  margin-bottom: 10px !important;
+  border-bottom: 2px solid #34495e;
+}
+
+h2 {
+  font-size: 1.3em;
+  font-weight: bold;
+  border-bottom: 1px solid #34495e;
+}
+
+h3 {
+  font-size: 1.3em;
+  font-weight: bold;
+}
+
+h4 {
+  font-size: 1.2em;
+  font-weight: bold;
+}
+
+/* Style des paragraphes */
+p {
+  text-align: justify;
+}
+
+/* Ajout d'un conteneur flexible */
+mjx-container {
+  font-size: 1em;
+  white-space: nowrap;
+  max-width: 100%;
+  font-family: 'STIX-Web', serif;
+}
+
+.math.display, .math.inline {
+  display: inline;
+}
+
+/* Style des listes */
+ul {
+  list-style-type: "- ";
+  margin-left: 20px;
+}
+
+/* Mise en forme du texte fort */
+strong {
+  color: #34495e;
+}
+
+/* Mise en forme du texte en emphase */
+em {
+  font-style: italic;
+}
+
+/* Liens identiques par défaut avec distinction au survol */
+a {
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  color: #34495e;
+}
+
+/* Style de la ligne horizontale */
+hr {
+  border: 1px solid #34495e;
+  margin: 20px 0;
+}
+
+/* Tables responsives */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  max-width: 100%;
+  display: block;
+  margin: auto;
+  font-size: 14px;
+  border: 1px solid #ccc;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 6px 10px;
+  text-align: center;
+}
+
+th {
+  background-color: #e6e6e6;
+  font-weight: bold;
+}
+
+td {
+  background-color: #fff;
+}
+
+tr:nth-child(even) td {
+  background-color: #f9f9f9;
+}
+
+caption {
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+/* Style général des blocs de code */
+pre, code {
+  background-color: grey !important;
+  color: white;
+  padding: 0px;
+  border-radius: 5px;
+  font-size: 14px;
+  overflow-x: auto;
+  word-break: break-word;
+}
+
+pre {
+  display: block;
+  white-space: pre-wrap;
+}
+
+code {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Améliorer l’apparence du dropdown */
+.dropdown-menu {
+  border-radius: 8px;
+  box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.15);
+  border: none;
+  min-width: 200px;
+  padding: 10px;
+}
+
+/* Espacement des éléments */
+/* Assurez-vous que chaque item occupe toute la largeur */
+.dropdown-menu .dropdown-item {
+  display: block; /* Garantit que l'élément prend toute la largeur */
+  width: 100%; /* Prend toute la largeur disponible */
+  font-size: 16px;
+  transition: background 0.3s ease-in-out;
+}
+
+/* Effet hover prenant toute la largeur */
+.dropdown-menu .dropdown-item:hover {
+  text-decoration: underline !important;
+  color: #34495e !important;
+  border-radius: 0; /* Supprime les arrondis si nécessaires */
+}
+
+/* Espacement entre les éléments */
+.dropdown-divider {
+  margin: 8px 0;
+}
+
+/* Ajuster la flèche */
+.dropdown-toggle::after {
+  margin-left: 8px;
+  transition: transform 0.3s;
+}
+
+@media (max-width: 768px) { 
+  html {
+    overflow-x: hidden;
+  }
+
+  .quarto-secondary-nav {
+      display: none !important;
+  }
+  
+  /* Formules MathJax responsives */
+  .math.display {
+    display: inline-block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  a {
+    word-break: break-word;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+}
