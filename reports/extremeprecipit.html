@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="fr" xml:lang="fr"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.6.36">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Nicolas Decoopman">
+<meta name="keywords" content="précipitations extrêmes, climat, modélisation climatique, changement climatique, France, adaptation territoriale, risques climatiques">
+<meta name="description" content="Analyse des précipitations extrêmes en France à l’aide de modèles climatiques haute résolution. Caractérisation des tendances et évaluation des risques climatiques pour l’adaptation territoriale.">
+
+<title>ExtremePrecipit - Caractérisation des précipitations extrêmes horaires en France</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for citations */
+div.csl-bib-body { }
+div.csl-entry {
+  clear: both;
+}
+.hanging-indent div.csl-entry {
+  margin-left:2em;
+  text-indent:-2em;
+}
+div.csl-left-margin {
+  min-width:2em;
+  float:left;
+}
+div.csl-right-inline {
+  margin-left:2em;
+  padding-left:1em;
+}
+div.csl-indent {
+  margin-left: 2em;
+}</style>
+
+
+<script src="extremeprecipit_files/libs/clipboard/clipboard.min.js"></script>
+<script src="extremeprecipit_files/libs/quarto-html/quarto.js"></script>
+<script src="extremeprecipit_files/libs/quarto-html/popper.min.js"></script>
+<script src="extremeprecipit_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="extremeprecipit_files/libs/quarto-html/anchor.min.js"></script>
+<link href="extremeprecipit_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="extremeprecipit_files/libs/quarto-html/quarto-syntax-highlighting-01c78b5cd655e4cd89133cf59d535862.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="extremeprecipit_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="extremeprecipit_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="extremeprecipit_files/libs/bootstrap/bootstrap-261c4509c90daf72ddf6c1a7dbf72322.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<style>
+/* Masquer les métadonnées (description, auteur, mots-clés) */
+.quarto-title-meta {
+    display: none !important;
+}
+
+/* Masquer la description visible */
+.description {
+    display: none !important;
+}
+
+/* Masquer les mots-clés visibles */
+.keywords {
+    display: none !important;
+}
+
+.quarto-float-caption {
+    text-align: center !important;
+}
+
+.intro-links {
+    display: flex;
+    flex-direction: column; /* titre au-dessus */
+    align-items: center;
+    justify-content: center;
+    gap: 0.4em;
+    margin-bottom: 1em;
+    font-family: "Segoe UI", Roboto, sans-serif;
+}
+
+.intro-links span.title {
+    font-weight: 600;
+    font-size: 1.2em;
+    letter-spacing: 0.02em;
+}
+
+.icon-links {
+    display: flex;
+    gap: 0.6em;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-links a svg {
+    transition: transform 0.2s ease, fill 0.2s ease;
+}
+
+.icon-links a:hover svg {
+    transform: scale(1.1);
+    fill: #007acc;
+}
+
+.icon {
+width: 24px;
+height: 24px;
+display: inline-block;
+vertical-align: middle;
+}
+
+/* Désactive la grille Quarto pour centrer le contenu */
+#quarto-content {
+    display: block !important;
+}
+
+main.content {
+    margin-left: auto;
+    margin-right: auto;
+    padding: 2rem 4rem;
+    max-width: 1000px;
+    box-sizing: border-box;
+}
+
+body {
+    text-align: justify;
+    font-size: 1.1rem;
+    line-height: 1.7;
+    flex-direction: column;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+nav#TOC {
+    text-align: left !important;
+    min-width: 240px;
+    max-width: 260px;
+    position: fixed;
+    left: calc(50vw - 500px - 280px);
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background-color: #f8f9fa;
+    border-right: 1px solid #ddd;
+    padding: 1rem;
+    font-size: 1rem;
+}
+
+@media screen and (max-width: 1600px) {
+    nav#TOC {
+        left: 0;
+    }
+    main.content {
+        margin-left: 280px;
+        margin-right: 0;
+        max-width: calc(100% - 280px);
+    }
+}
+
+@media screen and (max-width: 767px) {
+    h1, h2, h3 {
+        hyphens: none;
+        word-break: normal;
+    }
+}
+
+/* Formules MathJax responsives */
+.math.display {
+    display: inline-block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+a {
+    word-break: break-word;
+}
+
+table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+@media screen and (max-width: 768px) {
+    nav#TOC {
+        display: none;
+    }
+    main.content {
+        margin-left: 0;
+        padding: 1rem;
+        max-width: 100%;
+    }
+    body {
+        font-size: 1rem;
+        line-height: 1.6;
+        max-width: 100%;
+    }
+}
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const toc = document.querySelector("nav#TOC");
+    if (!toc) return;
+
+    const githubRepo = document.querySelector('meta[name="quarto-report-github"]')?.getAttribute("content")?.trim() || "";
+    function escapeAttr(s) {
+        return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+    const githubSvg = '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><path d="M12 .5c-6.63 0-12 5.37-12 12 0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.726-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.753-1.333-1.753-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.42-1.305.763-1.605-2.665-.305-5.466-1.332-5.466-5.932 0-1.31.468-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.29-1.552 3.296-1.23 3.296-1.23.653 1.653.242 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.803 5.625-5.475 5.922.432.372.816 1.103.816 2.222 0 1.606-.015 2.896-.015 3.286 0 .322.216.694.825.576 4.765-1.586 8.2-6.085 8.2-11.385 0-6.63-5.37-12-12-12z"/></svg>';
+    const githubBlock = githubRepo
+        ? '<a href="' + escapeAttr(githubRepo) + '" title="Voir sur GitHub" target="_blank" rel="noopener" aria-label="Voir sur GitHub">' + githubSvg + "</a>"
+        : "";
+
+    const introLinks = document.createElement("div");
+    introLinks.className = "intro-links";
+
+    introLinks.innerHTML =
+        '<span class="title">{NCS}decoopman</span>' +
+        '<div class="icon-links">' +
+        '<a href="https://ncsdecoopman.github.io/" title="Accueil" aria-label="Page d\'accueil">' +
+        '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24">' +
+        '<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>' +
+        "</svg></a>" +
+        githubBlock +
+        "</div>";
+
+    toc.prepend(introLinks);
+});
+</script>
+
+<!-- Analytics -->
+<script async="" src="https://www.googletagmanager.com/gtag/js?id=G-2YTSV4PT9X"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config','G-2YTSV4PT9X', { 'anonymize_ip': true });
+</script>
+<meta name="quarto-report-github" content="https://github.com/NCSdecoopman/ExtremePrecipit">
+
+
+</head>
+
+<body>
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article toc-left">
+<div id="quarto-sidebar-toc-left" class="sidebar toc-left">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Plan</h2>
+   
+  <ul>
+  <li><a href="#contexte-et-problématique" id="toc-contexte-et-problématique" class="nav-link active" data-scroll-target="#contexte-et-problématique"><span class="header-section-number">1</span> Contexte et problématique</a></li>
+  <li><a href="#données" id="toc-données" class="nav-link" data-scroll-target="#données"><span class="header-section-number">2</span> Données</a></li>
+  <li><a href="#approche-et-méthodologie" id="toc-approche-et-méthodologie" class="nav-link" data-scroll-target="#approche-et-méthodologie"><span class="header-section-number">3</span> Approche et méthodologie</a>
+  <ul class="collapse">
+  <li><a href="#workflow-et-architecture" id="toc-workflow-et-architecture" class="nav-link" data-scroll-target="#workflow-et-architecture"><span class="header-section-number">3.1</span> Workflow et architecture</a></li>
+  <li><a href="#pourquoi-cette-architecture" id="toc-pourquoi-cette-architecture" class="nav-link" data-scroll-target="#pourquoi-cette-architecture"><span class="header-section-number">3.2</span> Pourquoi cette architecture ?</a></li>
+  <li><a href="#expertise-technique-et-impact" id="toc-expertise-technique-et-impact" class="nav-link" data-scroll-target="#expertise-technique-et-impact"><span class="header-section-number">3.3</span> Expertise technique et impact</a>
+  <ul class="collapse">
+  <li><a href="#data-engineer-scalabilité-et-hpc" id="toc-data-engineer-scalabilité-et-hpc" class="nav-link" data-scroll-target="#data-engineer-scalabilité-et-hpc"><span class="header-section-number">3.3.1</span> Data Engineer (scalabilité et HPC)</a></li>
+  <li><a href="#data-scientist-modélisation-avancée-et-gestion-du-risque" id="toc-data-scientist-modélisation-avancée-et-gestion-du-risque" class="nav-link" data-scroll-target="#data-scientist-modélisation-avancée-et-gestion-du-risque"><span class="header-section-number">3.3.2</span> Data Scientist (modélisation avancée et gestion du risque)</a></li>
+  </ul></li>
+  </ul></li>
+  <li><a href="#technologies-utilisées" id="toc-technologies-utilisées" class="nav-link" data-scroll-target="#technologies-utilisées"><span class="header-section-number">4</span> Technologies utilisées</a></li>
+  <li><a href="#lien-vers-le-projet" id="toc-lien-vers-le-projet" class="nav-link" data-scroll-target="#lien-vers-le-projet"><span class="header-section-number">5</span> Lien vers le projet</a></li>
+  <li><a href="#cas-dusage-et-perspectives" id="toc-cas-dusage-et-perspectives" class="nav-link" data-scroll-target="#cas-dusage-et-perspectives"><span class="header-section-number">6</span> Cas d’usage et perspectives</a></li>
+  <li><a href="#références" id="toc-références" class="nav-link" data-scroll-target="#références"><span class="header-section-number">7</span> Références</a></li>
+  </ul>
+</nav>
+</div>
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar zindex-bottom">
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">ExtremePrecipit - Caractérisation des précipitations extrêmes horaires en France</h1>
+</div>
+
+<div>
+  <div class="description">
+    Analyse des précipitations extrêmes en France à l’aide de modèles climatiques haute résolution. Caractérisation des tendances et évaluation des risques climatiques pour l’adaptation territoriale.
+  </div>
+</div>
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Auteur·rice</div>
+    <div class="quarto-title-meta-contents">
+             <p>Nicolas Decoopman </p>
+          </div>
+  </div>
+    
+  
+    
+  </div>
+  
+
+<div>
+  <div class="keywords">
+    <div class="block-title">Mots clés</div>
+    <p>précipitations extrêmes, climat, modélisation climatique, changement climatique, France, adaptation territoriale, risques climatiques</p>
+  </div>
+</div>
+
+</header>
+
+
+<blockquote class="blockquote">
+<p><strong>TRANSFORMER 10 MILLIARDS DE POINTS DE DONNÉES CLIMATIQUES EN DÉCISIONS DE GESTION DES RISQUES.</strong></p>
+</blockquote>
+<div class="callout callout-style-simple callout-note callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+Impact et reconnaissance
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li><strong>Expert-Validated</strong> : projet réalisé en collaboration étroite avec le <strong>CNRS</strong>, <strong>Météo-France</strong> et l’<strong>IGE</strong>.</li>
+<li><strong>Autorité scientifique</strong> : méthodologie soumise à la revue internationale de rang A <strong>HESS (Copernicus)</strong> <span class="citation" data-cites="egusphere-2026-1202">(<a href="#ref-egusphere-2026-1202" role="doc-biblioref">1</a>)</span>.</li>
+</ul>
+</div>
+</div>
+<ul>
+<li><strong>Big Data</strong> : traitement de <strong>10 milliards de points</strong> (100 Go) sur 63 ans d’historique.</li>
+<li><strong>Ingénerie</strong> : pipeline distribué (<strong>96 workers</strong>) : gain de performance de <strong>80%</strong>.</li>
+<li><strong>Statistiques</strong> : modélisation des extrêmes par <strong>GEV non-stationnaire</strong> (7 modèles auto-sélectionnés).</li>
+<li><strong>Industrialisation</strong> : architecture <strong>Cloud-Native</strong> (Zarr, Parquet) avec CI/CD complète et monitoring.</li>
+</ul>
+<p>Le challenge technique était de concevoir une infrastructure capable d’ingérer, de transformer et de modéliser l’évolution des pluies extrêmes horaires en France (1959–2022). Un pont entre la <strong>donnée brute (NetCDF)</strong> et la <strong>décision (Dashboard/Rapport)</strong>.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="screenshot_extremeprecipit.webp" class="img-fluid quarto-figure quarto-figure-center figure-img" style="width:75.0%" data-fig-cap="Vue de l’application Streamlit"></p>
+</figure>
+</div>
+<section id="contexte-et-problématique" class="level1" data-number="1">
+<h1 data-number="1"><span class="header-section-number">1</span> Contexte et problématique</h1>
+<p>Le réchauffement climatique n’est plus une abstraction : <strong>+1,7°C en France</strong>, <strong>+2°C dans les Alpes</strong> <span class="citation" data-cites="Blanchet2021">(<a href="#ref-Blanchet2021" role="doc-biblioref">2</a>)</span>. Cette énergie thermique se traduit par une intensification brutale du cycle de l’eau (relation de Clausius-Clapeyron : <strong>+7% d’humidité par °C</strong>).</p>
+<p><strong>La problématique :</strong> si les extrêmes journaliers sont suivis, les <strong>précipitations horaires</strong> - responsables des crues éclair et des catastrophes urbaines - restaient jusqu’ici dans l’ombre.</p>
+<ul>
+<li><strong>Absence de données</strong> globalisées à haute résolution.</li>
+<li><strong>Complexité statistique</strong> des phénomènes convectifs locaux.</li>
+<li><strong>Incertitude critique</strong> sur la fiabilité des modèles climatiques actuels.</li>
+</ul>
+</section>
+<section id="données" class="level1" data-number="2">
+<h1 data-number="2"><span class="header-section-number">2</span> Données</h1>
+<p>Ce projet exploite la simulation <strong>CNRM-AROME (2,5 km)</strong> forcée par ERA5 (1959–2022). C’est l’un des rares modèles au monde capable de simuler explicitement la <strong>convection profonde</strong> (climatologie à convection permise). Les données pluviométriques horaires recueillies par <strong>Météo-France</strong> servent de référence absolue pour la validation.</p>
+</section>
+<section id="approche-et-méthodologie" class="level1" data-number="3">
+<h1 data-number="3"><span class="header-section-number">3</span> Approche et méthodologie</h1>
+<section id="workflow-et-architecture" class="level2" data-number="3.1">
+<h2 data-number="3.1" class="anchored" data-anchor-id="workflow-et-architecture"><span class="header-section-number">3.1</span> Workflow et architecture</h2>
+<div class="center">
+<p><a href="result/pipeline_extremeprecipit.png"><img src="result/pipeline_extremeprecipit.png" class="img-fluid"></a></p>
+</div>
+<p>L’infrastructure repose sur un pipeline de production automatisé, garantissant traçabilité et performance :</p>
+<ol type="1">
+<li><strong>Ingestion et standardisation</strong> : conversion des formats complexes (<strong>NetCDF</strong>) en formats cloud-native (<strong>Zarr</strong>, <strong>Parquet</strong>) pour un accès distribué.</li>
+<li><strong>Processus Big Data</strong> : extraction des maximas annuels sur cluster HPC (distribution via <strong>Dask</strong>).</li>
+<li><strong>Modélisation avancée</strong> : ajustement des lois GEV et détection de tendances non-stationnaires par point de grille.</li>
+<li><strong>Distribution des résultats</strong> : déploiement d’une application <strong>Streamlit</strong> interactive et génération de rapports automatisés via <strong>Quarto</strong>.</li>
+</ol>
+</section>
+<section id="pourquoi-cette-architecture" class="level2" data-number="3.2">
+<h2 data-number="3.2" class="anchored" data-anchor-id="pourquoi-cette-architecture"><span class="header-section-number">3.2</span> Pourquoi cette architecture ?</h2>
+<ul>
+<li><strong>Partitionnement physique fin</strong> : un fichier Parquet par combinaison (donnée/année/saison) pour des chargements atomiques et ultra-rapides.</li>
+<li><strong>Infrastructure frugale</strong> : hébergement statique sur <strong>Hugging Face</strong>, éliminant les coûts de serveurs SQL tout en maintenant une performance “Ready-to-Scale”.</li>
+<li><strong>Reproductibilité totale</strong> : pipeline versionné, configuration <em>As-Code</em> (YAML), et déploiement via Docker/CI/CD.</li>
+</ul>
+</section>
+<section id="expertise-technique-et-impact" class="level2" data-number="3.3">
+<h2 data-number="3.3" class="anchored" data-anchor-id="expertise-technique-et-impact"><span class="header-section-number">3.3</span> Expertise technique et impact</h2>
+<section id="data-engineer-scalabilité-et-hpc" class="level3" data-number="3.3.1">
+<h3 data-number="3.3.1" class="anchored" data-anchor-id="data-engineer-scalabilité-et-hpc"><span class="header-section-number">3.3.1</span> Data Engineer (scalabilité et HPC)</h3>
+<ul>
+<li><strong>Architecture ETL / ELT</strong> : pipeline de conversion massive NetCDF vers Zarr avec chunking adaptatif et filtrage géospatial.</li>
+<li><strong>Calcul distribué</strong> : parallélisation via <code>Dask</code> et <code>ProcessPoolExecutor</code> (<strong>96 workers</strong>) avec un gain de performance de <strong>80 %</strong> sur 100 Go de données.</li>
+<li><strong>Stockage cloud-native</strong> : optimisation du stockage via formats segmentés (<strong>Zarr</strong>, <strong>Parquet</strong>) avec compression spécifique pour accès concurrent.</li>
+<li><strong>Fiabilité du système</strong> : orchestration robuste et gestion fine des ressources mémoire (<code>Xarray</code> caching).</li>
+<li><strong>MLOps &amp; DevOps</strong> : CI/CD (GitHub Actions), conteneurisation (<strong>Docker</strong>), et versionnement de datasets sur <strong>HuggingFace</strong>.</li>
+</ul>
+</section>
+<section id="data-scientist-modélisation-avancée-et-gestion-du-risque" class="level3" data-number="3.3.2">
+<h3 data-number="3.3.2" class="anchored" data-anchor-id="data-scientist-modélisation-avancée-et-gestion-du-risque"><span class="header-section-number">3.3.2</span> Data Scientist (modélisation avancée et gestion du risque)</h3>
+<ul>
+<li><strong>Extreme Value Theory</strong> : modélisation <strong>GEV (Generalized Extreme Value)</strong> pour la quantification des risques rares (crues, inondations).</li>
+<li><strong>Robustesse statistique</strong> : sélection automatique parmi <strong>7 modèles</strong> via Likelihood Ratio Test et calcul de p-values.</li>
+<li><strong>Optimisation numérique</strong> : accélération des calculs de vraisemblance profilée via <strong>Numba</strong> et solveurs de racines avancés.</li>
+<li><strong>Validation scientifique</strong> : évaluation rigoureuse <em>vs.</em> observations (biais et corrélations) et publication dans la revue <strong>HESS (Copernicus)</strong>.</li>
+<li><strong>Analyse décisionnelle</strong> : conception de dashboards interactifs (<strong>Streamlit</strong>, <strong>Leafmap</strong>) pour transformer la statistique en vision territoriale.</li>
+</ul>
+</section>
+</section>
+</section>
+<section id="technologies-utilisées" class="level1" data-number="4">
+<h1 data-number="4"><span class="header-section-number">4</span> Technologies utilisées</h1>
+<ul>
+<li><strong>Data Backbone</strong> : <code>Zarr</code>, <code>Parquet</code>, <code>HuggingFace Datasets</code> (stockage distribué et versionné).</li>
+<li><strong>Compute Engine</strong> : <code>Dask</code>, <code>Polars</code>, <code>Xarray</code>, <code>Numba</code> (performance brute et parallélisation).</li>
+<li><strong>Modeling Stack</strong> : <code>Extreme Value Theory</code>, <code>GEV</code>, <code>Scipy Stats</code>, <code>Log-Likelihood Profiling</code>.</li>
+<li><strong>Infrastructure</strong> : <code>Docker</code>, <code>GitHub Actions</code>, <code>Airflow</code>, <code>Linux HPC Cluster</code>.</li>
+<li><strong>UX / Vision</strong> : <code>Streamlit</code>, <code>Quarto</code>, <code>Plotly</code>, <code>GeoPandas</code> (reporting automatisé).</li>
+</ul>
+</section>
+<section id="lien-vers-le-projet" class="level1" data-number="5">
+<h1 data-number="5"><span class="header-section-number">5</span> Lien vers le projet</h1>
+<ul>
+<li>L’article est accessible sur <a href="https://doi.org/10.5194/egusphere-2026-1202">EGUsphere</a>.</li>
+<li>Le rapport est accessible en <a href="https://ncsdecoopman.github.io/ExtremePrecipit/rapport/rapport.pdf">PDF</a>.<br>
+</li>
+<li>Les cartes générées sont accessibles en <a href="https://ncsdecoopman.github.io/ExtremePrecipit/rapport/annexes.pdf">PDF</a>.<br>
+</li>
+<li>Les présentations <a href="https://ncsdecoopman.github.io/ExtremePrecipit/presentation/presentation.pdf">Master 2 - UGA</a> et <a href="https://ncsdecoopman.github.io/ExtremePrecipit/presentation/presentation_mf.pdf">Météo-France</a> (<a href="https://ncsdecoopman.github.io/ExtremePrecipit/presentation/presentation_video.mp4">enregistrement vidéo</a>) sont également disponibles.<br>
+</li>
+<li>Le code source est accessible sur <a href="https://github.com/NCSdecoopman/ExtremePrecipit">GitHub</a>.<br>
+</li>
+<li>L’application est accessible sur <a href="https://huggingface.co/spaces/ncsdecoopman/ExtremePrecipit">HuggingFace</a>.</li>
+</ul>
+</section>
+<section id="cas-dusage-et-perspectives" class="level1" data-number="6">
+<h1 data-number="6"><span class="header-section-number">6</span> Cas d’usage et perspectives</h1>
+<p>Cette étude présente plusieurs opportunités dans le cadre d’applications pratiques. Premièrement, les résultats permettraient une meilleure anticipation des événements météorologiques extrêmes, essentielle pour la gestion des risques liés aux inondations et aux dégâts associés aux fortes précipitations. Les collectivités territoriales pourraient utiliser ces informations pour adapter leurs plans de prévention des risques naturels (PPRN) et renforcer leur résilience face au changement climatique.</p>
+<p>Deuxièmement, l’évaluation fine et spatialisée des précipitations extrêmes horaires fournirait aux gestionnaires des ouvrages hydrauliques, comme EDF, des données cruciales pour optimiser la gestion des réservoirs et la sécurité des barrages en période de crise.</p>
+<p>Enfin, à plus long terme, les résultats pourraient servir de base à des projections climatiques locales, alimentant les stratégies d’adaptation au changement climatique dans différents secteurs (urbanisme, agriculture, infrastructures).</p>
+</section>
+<section id="références" class="level1" data-number="7">
+<h1 data-number="7"><span class="header-section-number">7</span> Références</h1>
+<div id="refs" class="references csl-bib-body" role="list">
+<div id="ref-egusphere-2026-1202" class="csl-entry" role="listitem">
+<div class="csl-left-margin">1. </div><div class="csl-right-inline">Decoopman N, Blanchet J, Blanc A, Caillaud C. Climatology and trends of extreme precipitation in France: evaluation of an explicit-convection regional climate model. EGUsphere [Internet]. 2026;2026:1‑30. Disponible sur: <a href="https://egusphere.copernicus.org/preprints/2026/egusphere-2026-1202/">https://egusphere.copernicus.org/preprints/2026/egusphere-2026-1202/</a></div>
+</div>
+<div id="ref-Blanchet2021" class="csl-entry" role="listitem">
+<div class="csl-left-margin">2. </div><div class="csl-right-inline">Blanchet J, Blanc A, Creutin J-D. <a href="https://doi.org/10.1016/j.wace.2021.100356">Explaining recent trends in extreme precipitation in the Southwestern Alps by changes in atmospheric influences</a>. Weather and Climate Extremes. 2021;33:100356. </div>
+</div>
+</div>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copié");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copié");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="fr" xml:lang="fr"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.6.36">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Nicolas Decoopman">
+<meta name="keywords" content="MLOps, Data Engineering, Python, PyArrow, Zero-Copy, Memmap, OOM, Garbage Collection, Pandas, Feature Engineering">
+<meta name="description" content="Lors de la sélection et du filtrage de features sur des tables tabulaires massives, les allocations RAM doublent silencieusement. Voici comment neutraliser les fuites et le pic OOM grâce au Zero-Copy PyArrow, au memmap numpy et au déchargement glibc.">
+
+<title>Ce que PyArrow et Pandas ne vous disent pas sur le crash OOM à grande échelle en MLOps</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="mlops_zero_copy_memmap_oom_files/libs/clipboard/clipboard.min.js"></script>
+<script src="mlops_zero_copy_memmap_oom_files/libs/quarto-html/quarto.js"></script>
+<script src="mlops_zero_copy_memmap_oom_files/libs/quarto-html/popper.min.js"></script>
+<script src="mlops_zero_copy_memmap_oom_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="mlops_zero_copy_memmap_oom_files/libs/quarto-html/anchor.min.js"></script>
+<link href="mlops_zero_copy_memmap_oom_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="mlops_zero_copy_memmap_oom_files/libs/quarto-html/quarto-syntax-highlighting-01c78b5cd655e4cd89133cf59d535862.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="mlops_zero_copy_memmap_oom_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="mlops_zero_copy_memmap_oom_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="mlops_zero_copy_memmap_oom_files/libs/bootstrap/bootstrap-261c4509c90daf72ddf6c1a7dbf72322.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<style>
+/* Masquer les métadonnées (description, auteur, mots-clés) */
+.quarto-title-meta {
+    display: none !important;
+}
+
+/* Masquer la description visible */
+.description {
+    display: none !important;
+}
+
+/* Masquer les mots-clés visibles */
+.keywords {
+    display: none !important;
+}
+
+.quarto-float-caption {
+    text-align: center !important;
+}
+
+.intro-links {
+    display: flex;
+    flex-direction: column; /* titre au-dessus */
+    align-items: center;
+    justify-content: center;
+    gap: 0.4em;
+    margin-bottom: 1em;
+    font-family: "Segoe UI", Roboto, sans-serif;
+}
+
+.intro-links span.title {
+    font-weight: 600;
+    font-size: 1.2em;
+    letter-spacing: 0.02em;
+}
+
+.icon-links {
+    display: flex;
+    gap: 0.6em;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-links a svg {
+    transition: transform 0.2s ease, fill 0.2s ease;
+}
+
+.icon-links a:hover svg {
+    transform: scale(1.1);
+    fill: #007acc;
+}
+
+.icon {
+width: 24px;
+height: 24px;
+display: inline-block;
+vertical-align: middle;
+}
+
+/* Désactive la grille Quarto pour centrer le contenu */
+#quarto-content {
+    display: block !important;
+}
+
+main.content {
+    margin-left: auto;
+    margin-right: auto;
+    padding: 2rem 4rem;
+    max-width: 1000px;
+    box-sizing: border-box;
+}
+
+body {
+    text-align: justify;
+    font-size: 1.1rem;
+    line-height: 1.7;
+    flex-direction: column;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+nav#TOC {
+    text-align: left !important;
+    min-width: 240px;
+    max-width: 260px;
+    position: fixed;
+    left: calc(50vw - 500px - 280px);
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background-color: #f8f9fa;
+    border-right: 1px solid #ddd;
+    padding: 1rem;
+    font-size: 1rem;
+}
+
+@media screen and (max-width: 1600px) {
+    nav#TOC {
+        left: 0;
+    }
+    main.content {
+        margin-left: 280px;
+        margin-right: 0;
+        max-width: calc(100% - 280px);
+    }
+}
+
+@media screen and (max-width: 767px) {
+    h1, h2, h3 {
+        hyphens: none;
+        word-break: normal;
+    }
+}
+
+/* Formules MathJax responsives */
+.math.display {
+    display: inline-block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+a {
+    word-break: break-word;
+}
+
+table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+@media screen and (max-width: 768px) {
+    nav#TOC {
+        display: none;
+    }
+    main.content {
+        margin-left: 0;
+        padding: 1rem;
+        max-width: 100%;
+    }
+    body {
+        font-size: 1rem;
+        line-height: 1.6;
+        max-width: 100%;
+    }
+}
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const toc = document.querySelector("nav#TOC");
+    if (!toc) return;
+
+    const githubRepo = document.querySelector('meta[name="quarto-report-github"]')?.getAttribute("content")?.trim() || "";
+    function escapeAttr(s) {
+        return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+    const githubSvg = '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><path d="M12 .5c-6.63 0-12 5.37-12 12 0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.726-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.753-1.333-1.753-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.42-1.305.763-1.605-2.665-.305-5.466-1.332-5.466-5.932 0-1.31.468-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.29-1.552 3.296-1.23 3.296-1.23.653 1.653.242 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.803 5.625-5.475 5.922.432.372.816 1.103.816 2.222 0 1.606-.015 2.896-.015 3.286 0 .322.216.694.825.576 4.765-1.586 8.2-6.085 8.2-11.385 0-6.63-5.37-12-12-12z"/></svg>';
+    const githubBlock = githubRepo
+        ? '<a href="' + escapeAttr(githubRepo) + '" title="Voir sur GitHub" target="_blank" rel="noopener" aria-label="Voir sur GitHub">' + githubSvg + "</a>"
+        : "";
+
+    const introLinks = document.createElement("div");
+    introLinks.className = "intro-links";
+
+    introLinks.innerHTML =
+        '<span class="title">{NCS}decoopman</span>' +
+        '<div class="icon-links">' +
+        '<a href="https://ncsdecoopman.github.io/" title="Accueil" aria-label="Page d\'accueil">' +
+        '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24">' +
+        '<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>' +
+        "</svg></a>" +
+        githubBlock +
+        "</div>";
+
+    toc.prepend(introLinks);
+});
+</script>
+
+<!-- Analytics -->
+<script async="" src="https://www.googletagmanager.com/gtag/js?id=G-2YTSV4PT9X"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config','G-2YTSV4PT9X', { 'anonymize_ip': true });
+</script>
+<meta name="quarto-report-github" content="https://github.com/NCSdecoopman/">
+
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN") {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+</head>
+
+<body>
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article toc-left">
+<div id="quarto-sidebar-toc-left" class="sidebar toc-left">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Plan</h2>
+   
+  <ul>
+  <li><a href="#introduction" id="toc-introduction" class="nav-link active" data-scroll-target="#introduction"><span class="header-section-number">1</span> Introduction</a></li>
+  <li><a href="#étapes-techniques-pipeline" id="toc-étapes-techniques-pipeline" class="nav-link" data-scroll-target="#étapes-techniques-pipeline"><span class="header-section-number">2</span> Étapes techniques / Pipeline</a>
+  <ul class="collapse">
+  <li><a href="#élimination-du-rechargement-redondant-dans-le-balayage-de-features" id="toc-élimination-du-rechargement-redondant-dans-le-balayage-de-features" class="nav-link" data-scroll-target="#élimination-du-rechargement-redondant-dans-le-balayage-de-features"><span class="header-section-number">2.1</span> Élimination du rechargement redondant dans le balayage de features</a></li>
+  <li><a href="#ingestion-zero-copy-avec-pyarrow-self_destruct" id="toc-ingestion-zero-copy-avec-pyarrow-self_destruct" class="nav-link" data-scroll-target="#ingestion-zero-copy-avec-pyarrow-self_destruct"><span class="header-section-number">2.2</span> Ingestion Zero-Copy avec PyArrow self_destruct</a></li>
+  <li><a href="#vue-masquée-et-spilling-inconditionnel-via-numpy-memmap" id="toc-vue-masquée-et-spilling-inconditionnel-via-numpy-memmap" class="nav-link" data-scroll-target="#vue-masquée-et-spilling-inconditionnel-via-numpy-memmap"><span class="header-section-number">2.3</span> Vue masquée et spilling inconditionnel via NumPy Memmap</a></li>
+  <li><a href="#déchargement-forcé-de-la-mémoire-système-et-purge-des-arènes-glibc" id="toc-déchargement-forcé-de-la-mémoire-système-et-purge-des-arènes-glibc" class="nav-link" data-scroll-target="#déchargement-forcé-de-la-mémoire-système-et-purge-des-arènes-glibc"><span class="header-section-number">2.4</span> Déchargement forcé de la mémoire système et purge des arènes glibc</a></li>
+  </ul></li>
+  <li><a href="#stratégie-dadoption" id="toc-stratégie-dadoption" class="nav-link" data-scroll-target="#stratégie-dadoption"><span class="header-section-number">3</span> Stratégie d’adoption</a>
+  <ul class="collapse">
+  <li><a href="#frictions-et-limites-dadoption" id="toc-frictions-et-limites-dadoption" class="nav-link" data-scroll-target="#frictions-et-limites-dadoption"><span class="header-section-number">3.1</span> Frictions et limites d’adoption</a></li>
+  </ul></li>
+  <li><a href="#conclusion" id="toc-conclusion" class="nav-link" data-scroll-target="#conclusion"><span class="header-section-number">4</span> Conclusion</a>
+  <ul class="collapse">
+  <li><a href="#gains-concrets" id="toc-gains-concrets" class="nav-link" data-scroll-target="#gains-concrets"><span class="header-section-number">4.1</span> Gains concrets</a></li>
+  <li><a href="#trade-offs" id="toc-trade-offs" class="nav-link" data-scroll-target="#trade-offs"><span class="header-section-number">4.2</span> Trade-offs</a></li>
+  </ul></li>
+  <li><a href="#références-code" id="toc-références-code" class="nav-link" data-scroll-target="#références-code"><span class="header-section-number">5</span> Références code</a></li>
+  </ul>
+</nav>
+</div>
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar zindex-bottom">
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Ce que PyArrow et Pandas ne vous disent pas sur le crash OOM à grande échelle en MLOps</h1>
+</div>
+
+<div>
+  <div class="description">
+    Lors de la sélection et du filtrage de features sur des tables tabulaires massives, les allocations RAM doublent silencieusement. Voici comment neutraliser les fuites et le pic OOM grâce au Zero-Copy PyArrow, au memmap numpy et au déchargement glibc.
+  </div>
+</div>
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Auteur·rice</div>
+    <div class="quarto-title-meta-contents">
+             <p>Nicolas Decoopman </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Date de publication</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">10 août 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+<div>
+  <div class="keywords">
+    <div class="block-title">Mots clés</div>
+    <p>MLOps, Data Engineering, Python, PyArrow, Zero-Copy, Memmap, OOM, Garbage Collection, Pandas, Feature Engineering</p>
+  </div>
+</div>
+
+</header>
+
+
+<p>Lors de l’entraînement et du screening automatisé de nombreuses combinaisons de caractéristiques (<em>feature selection</em>) sur un jeu de données tabulaire massif de plusieurs millions de lignes et plus d’une centaine de variables, les pipelines MLOps s’effondrent fréquemment sous le coup du tueur OOM (<em>Out Of Memory</em> / Exit Status 137). Ce crash ne survient pas par manque d’optimisation de l’algorithme d’apprentissage, mais à cause d’allocations de mémoire cachées et redondantes : rechargement intégral de la table de données par les fonctions d’évaluation, duplication des buffers mémoire lors de la conversion de tables PyArrow en DataFrames Pandas (<code>to_pandas()</code>), copies défensives d’indexation (<code>df.loc[mask]</code>), et rétention silencieuse des pages mémoire dans le pool de PyArrow et les arènes <code>malloc</code> de la <code>glibc</code>.</p>
+<p>Pour traiter l’intégralité de la matrice de données en mémoire vive sans faire aucun sous-échantillonnage destructeur, nous avons implémenté une stratégie combinée de Zero-Copy, de Spilling contrôlé et de purge bas niveau. En éliminant la double matérialisation grâce à <code>to_pandas(self_destruct=True, split_blocks=True)</code>, en dérivant la sous-matrice d’entraînement directement dans un fichier mappé en mémoire (<code>np.memmap</code>) via une extraction par colonnes <code>feature_matrix_masked</code>, en transmettant directement les références de la table en mémoire lors du balayage des sous-ensembles de features, et en restituant explicitement la mémoire à l’OS via <code>malloc_trim()</code>, nous sommes parvenus à diviser par 3 le pic de mémoire vive (RAM de 13.5 Go ramenée à moins de 4.8 Go) tout en garantissant un entraînement à 100% sur la table entière.</p>
+<section id="introduction" class="level1" data-number="1">
+<h1 data-number="1"><span class="header-section-number">1</span> Introduction</h1>
+<p>Dans les architectures MLOps à grande échelle (combinaison de données d’observations et de descripteurs tabulaires à haute dimension), la construction de tables d’entraînement engendre des volumes massifs de données. Lorsqu’un pipeline MLOps exécute des algorithmes de sélection séquentielle de features (comme le <em>Forward Feature Selection</em> ou le <em>Feature Screening</em>), il doit évaluer la contribution de dizaines de sous-ensembles de variables sur l’ensemble du dataset.</p>
+<p>L’approche naïve consiste à charger la table Parquet globale, puis à filtrer les sous-ensembles de lignes (masques d’entraînement et d’évaluation) et de colonnes à chaque itération. Cependant, sur des volumes dépassant quelques gigaoctets en RAM, l’empilement des allocations temporaires provoque une explosion exponentielle du <em>Resident Set Size</em> (RSS). Les solutions de secours habituellement préconisées - telles que le sous-échantillonnage aléatoire des lignes - dégradent la représentativité des données et biaisent l’évaluation du modèle.</p>
+<p>Le défi technique consiste donc à conserver 100% des observations en mémoire vive sur des instances aux ressources limitées (ex. 16 Go de RAM), tout en évitant que la gestion automatique de la mémoire en Python (Garbage Collector) ne laisse fuiter des gigaoctets de buffers inutilisés entre deux évaluations.</p>
+</section>
+<section id="étapes-techniques-pipeline" class="level1" data-number="2">
+<h1 data-number="2"><span class="header-section-number">2</span> Étapes techniques / Pipeline</h1>
+<p>Le moteur d’expérimentation MLOps orchestre la préparation des données et le balayage des variables à travers un découpage modulaire strict. Pour neutraliser les pics de mémoire sans sacrifier la précision des calculs, quatre optimisations architecturales ont été intégrées.</p>
+<section id="élimination-du-rechargement-redondant-dans-le-balayage-de-features" class="level2" data-number="2.1">
+<h2 data-number="2.1" class="anchored" data-anchor-id="élimination-du-rechargement-redondant-dans-le-balayage-de-features"><span class="header-section-number">2.1</span> Élimination du rechargement redondant dans le balayage de features</h2>
+<p>Dans l’implémentation initiale, la fonction d’évaluation <code>_eval_feature_set</code> conservait la table complète en RAM (<code>full_data</code>) tout en ré-exécutant une lecture disque du fichier Parquet pour évaluer le pool complet de variables. Cette double matérialisation engendrait un pic de RAM immédiat de 13 Go.</p>
+<p>La solution consiste à réutiliser la référence de la table déjà chargée et nettoyée, puis à déclencher une libération explicite (<code>del</code> + <code>gc.collect()</code>) dès la fin de l’évaluation du pool global.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Fichier : src/ml/features/search.py</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> run_feature_search(table_path: Path, work_dir: Path, pool_features: <span class="bu">list</span>[<span class="bu">str</span>]) <span class="op">-&gt;</span> <span class="bu">list</span>[<span class="bu">dict</span>]:</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="co"># 1. Chargement unique de la table d'entraînement complète</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    full_data <span class="op">=</span> load_training_table(table_path, quiet<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    log_rss(<span class="st">"full_pool_loaded"</span>)</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    <span class="co"># 2. Transmission de la référence 'data' pour éviter tout re-chargement disque</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    full_point <span class="op">=</span> _eval_feature_set(</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>        table_path<span class="op">=</span>table_path,</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>        active_features<span class="op">=</span>pool_features,</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>        tag<span class="op">=</span><span class="st">"full_pool"</span>,</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>        data<span class="op">=</span>full_data,  <span class="co"># Réutilisation directe sans I/O redondant</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>    log_rss(<span class="st">"full_pool_eval_done"</span>)</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>    <span class="co"># 3. Libération explicite du bloc mémoire avant les balayages secondaires</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">del</span> full_data</span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>    gc.collect()</span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>    malloc_trim()</span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> [full_point]</span></code><button title="Copier vers le presse-papier" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="ingestion-zero-copy-avec-pyarrow-self_destruct" class="level2" data-number="2.2">
+<h2 data-number="2.2" class="anchored" data-anchor-id="ingestion-zero-copy-avec-pyarrow-self_destruct"><span class="header-section-number">2.2</span> Ingestion Zero-Copy avec PyArrow self_destruct</h2>
+<p>La lecture de fichiers Parquet partitionnés s’appuie sur PyArrow pour concaténer les <em>RowGroups</em>. Lors de la conversion d’une table <code>pyarrow.Table</code> vers un <code>pandas.DataFrame</code>, Pandas effectue par défaut une copie complète des blocs mémoire, doublant l’empreinte mémoire de la table à l’ingestion.</p>
+<p>En combinant <code>split_blocks=True</code> et <code>self_destruct=True</code>, PyArrow cède directement la propriété de ses buffers internes au DataFrame Pandas au fur et à mesure de la conversion, détruisant la table Arrow source pour maintenir une empreinte mémoire constante.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Fichier : src/ml/data/dataset.py</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> gc</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow <span class="im">as</span> pa</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow.parquet <span class="im">as</span> pq</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> load_training_table(path: Path, columns: <span class="bu">list</span>[<span class="bu">str</span>] <span class="op">|</span> <span class="va">None</span> <span class="op">=</span> <span class="va">None</span>) <span class="op">-&gt;</span> pd.DataFrame:</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    pf <span class="op">=</span> pq.ParquetFile(path)</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    parts <span class="op">=</span> []</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> i <span class="kw">in</span> <span class="bu">range</span>(pf.num_row_groups):</span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>        rg <span class="op">=</span> pf.read_row_group(i, columns<span class="op">=</span>columns)</span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> rg.num_rows <span class="op">&gt;</span> <span class="dv">0</span>:</span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>            parts.append(rg)</span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>        <span class="kw">del</span> rg</span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>        gc.collect()</span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>    table <span class="op">=</span> pa.concat_tables(parts)</span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>    <span class="kw">del</span> parts</span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>    gc.collect()</span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Conversion Zero-Copy : libération immédiate des buffers Arrow</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>    df <span class="op">=</span> table.to_pandas(self_destruct<span class="op">=</span><span class="va">True</span>, split_blocks<span class="op">=</span><span class="va">True</span>, use_threads<span class="op">=</span><span class="va">False</span>)</span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>    <span class="kw">del</span> table</span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>    gc.collect()</span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Optimisation des identifiants à haute cardinalité en dtypes catégoriels</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="st">"entity_id"</span> <span class="kw">in</span> df.columns:</span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>        df[<span class="st">"entity_id"</span>] <span class="op">=</span> df[<span class="st">"entity_id"</span>].astype(<span class="st">"category"</span>)</span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> df</span></code><button title="Copier vers le presse-papier" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="vue-masquée-et-spilling-inconditionnel-via-numpy-memmap" class="level2" data-number="2.3">
+<h2 data-number="2.3" class="anchored" data-anchor-id="vue-masquée-et-spilling-inconditionnel-via-numpy-memmap"><span class="header-section-number">2.3</span> Vue masquée et spilling inconditionnel via NumPy Memmap</h2>
+<p>Lors de la préparation de la matrice de caractéristiques <span class="math inline">\(X \in \mathbb{R}^{N \times K}\)</span> pour l’entraînement des modèles, l’utilisation classique de <code>df.loc[mask, feature_cols]</code> crée une nouvelle copie dense contiguë en RAM. Sur des volumes importants de données et de variables, la matrice intermédiaire peut consommer plusieurs gigaoctets de RAM.</p>
+<p>Pour éliminer cette allocation, la fonction <code>feature_matrix_masked</code> extrait directement les colonnes sous forme de tableaux contigus float32 et les écrit une à une dans un fichier mappé en mémoire (<code>np.memmap</code>). De cette façon, la matrice dense n’existe jamais simultanément dans la mémoire RAM du processus.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Fichier : src/ml/training/common.py</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> pathlib <span class="im">import</span> Path</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> feature_matrix_masked(</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>    df: pd.DataFrame, </span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>    feature_cols: <span class="bu">list</span>[<span class="bu">str</span>], </span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>    mask: np.ndarray, </span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>    spill_path: Path <span class="op">|</span> <span class="va">None</span> <span class="op">=</span> <span class="va">None</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="bu">tuple</span>[np.ndarray, Path <span class="op">|</span> <span class="va">None</span>]:</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>    <span class="co">"""Extrait la sous-matrice float32 sans matérialiser df.loc[mask]."""</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>    idx <span class="op">=</span> np.flatnonzero(mask)</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>    shape <span class="op">=</span> (idx.size, <span class="bu">len</span>(feature_cols))</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> spill_path <span class="kw">is</span> <span class="kw">not</span> <span class="va">None</span> <span class="kw">and</span> idx.size <span class="op">&gt;</span> <span class="dv">0</span>:</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>        spill_path <span class="op">=</span> Path(spill_path)</span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>        spill_path.parent.mkdir(parents<span class="op">=</span><span class="va">True</span>, exist_ok<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Ingestion directe colonne par colonne sur disque mappé en mémoire</span></span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>        out <span class="op">=</span> np.memmap(spill_path, dtype<span class="op">=</span>np.float32, mode<span class="op">=</span><span class="st">"w+"</span>, shape<span class="op">=</span>shape)</span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> j, col <span class="kw">in</span> <span class="bu">enumerate</span>(feature_cols):</span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>            out[:, j] <span class="op">=</span> df[col].to_numpy(dtype<span class="op">=</span>np.float32, copy<span class="op">=</span><span class="va">False</span>)[idx]</span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>        out.flush()</span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>        <span class="kw">del</span> out</span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Retourne une vue memmap en lecture seule (consommation RAM ~ 0 Mo)</span></span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> np.memmap(spill_path, dtype<span class="op">=</span>np.float32, mode<span class="op">=</span><span class="st">"r"</span>, shape<span class="op">=</span>shape), spill_path</span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>    out_arr <span class="op">=</span> np.empty(shape, dtype<span class="op">=</span>np.float32)</span>
+<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> j, col <span class="kw">in</span> <span class="bu">enumerate</span>(feature_cols):</span>
+<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a>        out_arr[:, j] <span class="op">=</span> df[col].to_numpy(dtype<span class="op">=</span>np.float32, copy<span class="op">=</span><span class="va">False</span>)[idx]</span>
+<span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> out_arr, <span class="va">None</span></span></code><button title="Copier vers le presse-papier" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+<section id="déchargement-forcé-de-la-mémoire-système-et-purge-des-arènes-glibc" class="level2" data-number="2.4">
+<h2 data-number="2.4" class="anchored" data-anchor-id="déchargement-forcé-de-la-mémoire-système-et-purge-des-arènes-glibc"><span class="header-section-number">2.4</span> Déchargement forcé de la mémoire système et purge des arènes glibc</h2>
+<p>Sous Linux, détruire un objet Python avec <code>del</code> et invoquer <code>gc.collect()</code> ne restitue pas immédiatement la mémoire au système d’exploitation. D’une part, le pool de mémoire interne de PyArrow conserve les pages libérées en cache. D’autre part, l’allocateur de mémoire C (<code>glibc</code>) conserve les arènes d’allocation (<em>arenas</em>) en haut du tas (<em>heap</em>).</p>
+<p>La fonction <code>malloc_trim</code> combine la libération du pool PyArrow et l’appel système <code>malloc_trim(0)</code> via <code>ctypes</code> pour forcer la restitution effective des pages libérées à l’OS.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Fichier : src/ml/training/common.py</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> ctypes</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> gc</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> malloc_trim() <span class="op">-&gt;</span> <span class="va">None</span>:</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>    <span class="co">"""Libère la mémoire inutilisée du pool PyArrow et des arènes C glibc."""</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>    gc.collect()</span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>    <span class="co"># 1. Purge du pool de mémoire PyArrow</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>    <span class="cf">try</span>:</span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>        <span class="im">import</span> pyarrow <span class="im">as</span> pa</span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>        pa.default_memory_pool().release_unused()</span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>    <span class="cf">except</span> (<span class="pp">ImportError</span>, <span class="pp">AttributeError</span>):</span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>        <span class="cf">pass</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a>    <span class="co"># 2. Appel système glibc malloc_trim (Linux)</span></span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a>    <span class="cf">try</span>:</span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a>        ctypes.CDLL(<span class="st">"libc.so.6"</span>).malloc_trim(<span class="dv">0</span>)</span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a>    <span class="cf">except</span> (<span class="pp">OSError</span>, <span class="pp">AttributeError</span>):</span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span></span></code><button title="Copier vers le presse-papier" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+</section>
+<section id="stratégie-dadoption" class="level1" data-number="3">
+<h1 data-number="3"><span class="header-section-number">3</span> Stratégie d’adoption</h1>
+<p>Pour transposer cette architecture Zero-Copy et anti-OOM dans un pipeline MLOps existant, l’équipe d’ingénierie doit suivre les étapes suivantes :</p>
+<ol type="1">
+<li><strong>Remplacer les conversions naïves Arrow/Pandas</strong> : Activer les drapeaux <code>self_destruct=True</code> et <code>split_blocks=True</code> sur toutes les requêtes d’ingestion Parquet pour éviter la double matérialisation en RAM.</li>
+<li><strong>Proscrire le slicing par <code>df.loc[mask]</code></strong> : Remplacer l’indexation Pandas dans les boucles d’entraînement par un remplissage colonne par colonne (<code>to_numpy(copy=False)</code>) vers des tableaux NumPy pré-alloués.</li>
+<li><strong>Mettre en place le Spilling sur disque (<code>memmap</code>)</strong> : Rediriger la génération des matrices d’entraînement volumineuses vers des fichiers binaires <code>.dat</code> temporaires stockés sur un disque NVMe rapide.</li>
+<li><strong>Passer les datasets par référence</strong> : Modifier la signature des fonctions d’évaluation dans les algorithmes de recherche de features pour réutiliser les objets en mémoire plutôt que de ré-exécuter des lectures disque.</li>
+<li><strong>Insérer un verrou de nettoyage mémoire (<code>malloc_trim</code>)</strong> : Exécuter <code>malloc_trim()</code> après chaque phase critique d’évaluation ou d’entraînement pour réinitialiser le RSS de l’application.</li>
+</ol>
+<section id="frictions-et-limites-dadoption" class="level2" data-number="3.1">
+<h2 data-number="3.1" class="anchored" data-anchor-id="frictions-et-limites-dadoption"><span class="header-section-number">3.1</span> Frictions et limites d’adoption</h2>
+<ul>
+<li><strong>Dépendance au système d’exploitation</strong> : L’appel <code>ctypes.CDLL("libc.so.6").malloc_trim(0)</code> est spécifique aux systèmes POSIX/Linux sous <code>glibc</code>. Sur macOS ou Windows, l’appel échoue silencieusement et se rabat uniquement sur <code>gc.collect()</code>.</li>
+<li><strong>Exigence de disques I/O rapides</strong> : Le spilling inconditionnel via <code>np.memmap</code> déporte la charge mémoire vers le système de fichiers. L’utilisation d’un stockage NVMe local est indispensable pour éviter d’introduire des goulots d’étranglement en I/O.</li>
+<li><strong>Destruction irréversible des objets Arrow</strong> : L’option <code>self_destruct=True</code> rend la table <code>pyarrow.Table</code> inutilisable immédiatement après sa conversion. Toute réutilisation ultérieure nécessite une nouvelle lecture disque ou la conservation du DataFrame Pandas résiduel.</li>
+</ul>
+</section>
+</section>
+<section id="conclusion" class="level1" data-number="4">
+<h1 data-number="4"><span class="header-section-number">4</span> Conclusion</h1>
+<section id="gains-concrets" class="level2" data-number="4.1">
+<h2 data-number="4.1" class="anchored" data-anchor-id="gains-concrets"><span class="header-section-number">4.1</span> Gains concrets</h2>
+<ul>
+<li><strong>Division par 3 du pic de mémoire (RAM)</strong> : Passage d’un pic critique de <strong>13.5 Go à 4.6 Go</strong> de RSS lors du balayage complet des caractéristiques.</li>
+<li><strong>Taux de complétion de 100% sans OOM</strong> : Éradication totale des plantages d’exécution (Exit Code 137 / Linux OOM-killer) sur des serveurs contraints.</li>
+<li><strong>Conservation de 100% du jeu de données</strong> : Traitement de l’intégralité de la table d’entraînement sans recourir au sous-échantillonnage destructeur.</li>
+<li><strong>Zero-Copy à l’ingestion</strong> : Réduction de <strong>40% du temps de chargement</strong> de la table d’entraînement par suppression des étapes de copie mémoire intermédiaire.</li>
+</ul>
+</section>
+<section id="trade-offs" class="level2" data-number="4.2">
+<h2 data-number="4.2" class="anchored" data-anchor-id="trade-offs"><span class="header-section-number">4.2</span> Trade-offs</h2>
+<ul>
+<li><strong>Gestion explicite du cycle de vie mémoire</strong> : Nécessite l’insertion manuelle de purges <code>malloc_trim()</code> et de suppressions de variables (<code>del</code>) aux points d’orgue du pipeline.</li>
+<li><strong>Complexité d’I/O disque temporaire</strong> : Génération de fichiers binaires mappés (<code>.dat</code>) nécessitant un nettoyage propre des fichiers temporaires après entraînement.</li>
+</ul>
+</section>
+</section>
+<section id="références-code" class="level1" data-number="5">
+<h1 data-number="5"><span class="header-section-number">5</span> Références code</h1>
+<ul>
+<li><code>src/ml/features/search.py</code> : Algorithme de recherche séquentielle de features optimisé pour le passage par référence et l’évaluation Zero-Copy.</li>
+<li><code>src/ml/data/dataset.py</code> : Chargeur de tables Parquet avec concaténation par <em>RowGroups</em> et conversion PyArrow <code>self_destruct</code>.</li>
+<li><code>src/ml/training/common.py</code> : Implémentation des utilitaires système <code>feature_matrix_masked</code> (spilling <code>np.memmap</code>) et <code>malloc_trim</code> (restitution des arènes <code>glibc</code>).</li>
+<li><code>src/ml/training/trainer.py</code> : Moteur d’entraînement de modèles MLOps exploitant les matrices masquées mappées en mémoire.</li>
+</ul>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copié");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copié");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="fr" xml:lang="fr"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.6.36">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Nicolas Decoopman">
+<meta name="keywords" content="NLP, Production, Deep Learning, PyTorch Lightning, Transformers, Multi-Task Learning, Inférence">
+<meta name="description" content="Optimisez vos pipelines NLP en production en mutualisant un seul backbone transformers pour plusieurs tâches de classification simultanées.">
+
+<title>Arrêtez d’entraîner 4 modèles NLP : comment une architecture multi-têtes divise drastiquement vos coûts d’inférence</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="multi_head_nlp_architecture_files/libs/clipboard/clipboard.min.js"></script>
+<script src="multi_head_nlp_architecture_files/libs/quarto-html/quarto.js"></script>
+<script src="multi_head_nlp_architecture_files/libs/quarto-html/popper.min.js"></script>
+<script src="multi_head_nlp_architecture_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="multi_head_nlp_architecture_files/libs/quarto-html/anchor.min.js"></script>
+<link href="multi_head_nlp_architecture_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="multi_head_nlp_architecture_files/libs/quarto-html/quarto-syntax-highlighting-01c78b5cd655e4cd89133cf59d535862.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="multi_head_nlp_architecture_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="multi_head_nlp_architecture_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="multi_head_nlp_architecture_files/libs/bootstrap/bootstrap-261c4509c90daf72ddf6c1a7dbf72322.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<style>
+/* Masquer les métadonnées (description, auteur, mots-clés) */
+.quarto-title-meta {
+    display: none !important;
+}
+
+/* Masquer la description visible */
+.description {
+    display: none !important;
+}
+
+/* Masquer les mots-clés visibles */
+.keywords {
+    display: none !important;
+}
+
+.quarto-float-caption {
+    text-align: center !important;
+}
+
+.intro-links {
+    display: flex;
+    flex-direction: column; /* titre au-dessus */
+    align-items: center;
+    justify-content: center;
+    gap: 0.4em;
+    margin-bottom: 1em;
+    font-family: "Segoe UI", Roboto, sans-serif;
+}
+
+.intro-links span.title {
+    font-weight: 600;
+    font-size: 1.2em;
+    letter-spacing: 0.02em;
+}
+
+.icon-links {
+    display: flex;
+    gap: 0.6em;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-links a svg {
+    transition: transform 0.2s ease, fill 0.2s ease;
+}
+
+.icon-links a:hover svg {
+    transform: scale(1.1);
+    fill: #007acc;
+}
+
+.icon {
+width: 24px;
+height: 24px;
+display: inline-block;
+vertical-align: middle;
+}
+
+/* Désactive la grille Quarto pour centrer le contenu */
+#quarto-content {
+    display: block !important;
+}
+
+main.content {
+    margin-left: auto;
+    margin-right: auto;
+    padding: 2rem 4rem;
+    max-width: 1000px;
+    box-sizing: border-box;
+}
+
+body {
+    text-align: justify;
+    font-size: 1.1rem;
+    line-height: 1.7;
+    flex-direction: column;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+nav#TOC {
+    text-align: left !important;
+    min-width: 240px;
+    max-width: 260px;
+    position: fixed;
+    left: calc(50vw - 500px - 280px);
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background-color: #f8f9fa;
+    border-right: 1px solid #ddd;
+    padding: 1rem;
+    font-size: 1rem;
+}
+
+@media screen and (max-width: 1600px) {
+    nav#TOC {
+        left: 0;
+    }
+    main.content {
+        margin-left: 280px;
+        margin-right: 0;
+        max-width: calc(100% - 280px);
+    }
+}
+
+@media screen and (max-width: 767px) {
+    h1, h2, h3 {
+        hyphens: none;
+        word-break: normal;
+    }
+}
+
+/* Formules MathJax responsives */
+.math.display {
+    display: inline-block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+a {
+    word-break: break-word;
+}
+
+table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+@media screen and (max-width: 768px) {
+    nav#TOC {
+        display: none;
+    }
+    main.content {
+        margin-left: 0;
+        padding: 1rem;
+        max-width: 100%;
+    }
+    body {
+        font-size: 1rem;
+        line-height: 1.6;
+        max-width: 100%;
+    }
+}
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const toc = document.querySelector("nav#TOC");
+    if (!toc) return;
+
+    const githubRepo = document.querySelector('meta[name="quarto-report-github"]')?.getAttribute("content")?.trim() || "";
+    function escapeAttr(s) {
+        return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+    const githubSvg = '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><path d="M12 .5c-6.63 0-12 5.37-12 12 0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.726-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.753-1.333-1.753-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.42-1.305.763-1.605-2.665-.305-5.466-1.332-5.466-5.932 0-1.31.468-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.29-1.552 3.296-1.23 3.296-1.23.653 1.653.242 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.803 5.625-5.475 5.922.432.372.816 1.103.816 2.222 0 1.606-.015 2.896-.015 3.286 0 .322.216.694.825.576 4.765-1.586 8.2-6.085 8.2-11.385 0-6.63-5.37-12-12-12z"/></svg>';
+    const githubBlock = githubRepo
+        ? '<a href="' + escapeAttr(githubRepo) + '" title="Voir sur GitHub" target="_blank" rel="noopener" aria-label="Voir sur GitHub">' + githubSvg + "</a>"
+        : "";
+
+    const introLinks = document.createElement("div");
+    introLinks.className = "intro-links";
+
+    introLinks.innerHTML =
+        '<span class="title">{NCS}decoopman</span>' +
+        '<div class="icon-links">' +
+        '<a href="https://ncsdecoopman.github.io/" title="Accueil" aria-label="Page d\'accueil">' +
+        '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24">' +
+        '<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>' +
+        "</svg></a>" +
+        githubBlock +
+        "</div>";
+
+    toc.prepend(introLinks);
+});
+</script>
+
+<!-- Analytics -->
+<script async="" src="https://www.googletagmanager.com/gtag/js?id=G-2YTSV4PT9X"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config','G-2YTSV4PT9X', { 'anonymize_ip': true });
+</script>
+<meta name="quarto-report-github" content="https://github.com/NCSdecoopman/FeelingsAnalysis">
+
+
+</head>
+
+<body>
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article toc-left">
+<div id="quarto-sidebar-toc-left" class="sidebar toc-left">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Plan</h2>
+   
+  <ul>
+  <li><a href="#le-problème-le-mur-de-la-vram" id="toc-le-problème-le-mur-de-la-vram" class="nav-link active" data-scroll-target="#le-problème-le-mur-de-la-vram"><span class="header-section-number">1</span> Le problème : le mur de la VRAM</a></li>
+  <li><a href="#lapproche-le-multi-task-learning-mtl" id="toc-lapproche-le-multi-task-learning-mtl" class="nav-link" data-scroll-target="#lapproche-le-multi-task-learning-mtl"><span class="header-section-number">2</span> L’approche : le multi-task learning (MTL)</a>
+  <ul class="collapse">
+  <li><a href="#pourquoi-ça-fonctionne" id="toc-pourquoi-ça-fonctionne" class="nav-link" data-scroll-target="#pourquoi-ça-fonctionne"><span class="header-section-number">2.1</span> Pourquoi ça fonctionne ?</a></li>
+  </ul></li>
+  <li><a href="#implémentation-technique-avec-pytorch-lightning" id="toc-implémentation-technique-avec-pytorch-lightning" class="nav-link" data-scroll-target="#implémentation-technique-avec-pytorch-lightning"><span class="header-section-number">3</span> Implémentation technique avec PyTorch Lightning</a>
+  <ul class="collapse">
+  <li><a href="#zoom-sur-le-code" id="toc-zoom-sur-le-code" class="nav-link" data-scroll-target="#zoom-sur-le-code"><span class="header-section-number">3.1</span> Zoom sur le code</a></li>
+  </ul></li>
+  <li><a href="#stratégie-dadoption-ne-tombez-pas-dans-le-piège" id="toc-stratégie-dadoption-ne-tombez-pas-dans-le-piège" class="nav-link" data-scroll-target="#stratégie-dadoption-ne-tombez-pas-dans-le-piège"><span class="header-section-number">4</span> Stratégie d’adoption : ne tombez pas dans le piège</a></li>
+  <li><a href="#conclusion-un-gain-massif-en-production" id="toc-conclusion-un-gain-massif-en-production" class="nav-link" data-scroll-target="#conclusion-un-gain-massif-en-production"><span class="header-section-number">5</span> Conclusion : un gain massif en production</a></li>
+  <li><a href="#références-et-lectures-complémentaires" id="toc-références-et-lectures-complémentaires" class="nav-link" data-scroll-target="#références-et-lectures-complémentaires"><span class="header-section-number">6</span> Références et lectures complémentaires</a></li>
+  </ul>
+</nav>
+</div>
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar zindex-bottom">
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Arrêtez d’entraîner 4 modèles NLP : comment une architecture multi-têtes divise drastiquement vos coûts d’inférence</h1>
+</div>
+
+<div>
+  <div class="description">
+    Optimisez vos pipelines NLP en production en mutualisant un seul backbone transformers pour plusieurs tâches de classification simultanées.
+  </div>
+</div>
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Auteur·rice</div>
+    <div class="quarto-title-meta-contents">
+             <p>Nicolas Decoopman </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Date de publication</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">13 avril 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+<div>
+  <div class="keywords">
+    <div class="block-title">Mots clés</div>
+    <p>NLP, Production, Deep Learning, PyTorch Lightning, Transformers, Multi-Task Learning, Inférence</p>
+  </div>
+</div>
+
+</header>
+
+
+<p>Imaginez que vous deviez analyser des avis clients selon quatre dimensions indépendantes : le <strong>prix</strong>, la <strong>cuisine</strong>, le <strong>service</strong> et l’<strong>ambiance</strong>.</p>
+<p>L’approche classique consiste souvent à entraîner quatre modèles distincts. Mais en production, charger simultanément quatre instances de <code>CamemBERT-Large</code> est une recette parfaite pour un désastre opérationnel : saturation immédiate de la VRAM (Out-Of-Memory), latence de requêtage élevée et factures de compute qui explosent.</p>
+<p>Voici comment passer d’une approche “force brute” à une architecture multi-têtes (<em>Multi-Head</em>) efficace.</p>
+<section id="le-problème-le-mur-de-la-vram" class="level2" data-number="1">
+<h2 data-number="1" class="anchored" data-anchor-id="le-problème-le-mur-de-la-vram"><span class="header-section-number">1</span> Le problème : le mur de la VRAM</h2>
+<p>Pour beaucoup d’équipes data, multiplier les modèles semble être la solution la plus simple pour gérer des tâches de classification multiples. Pourtant, cette stratégie n’est pas “scalable”. Chaque modèle CamemBERT supplémentaire nécessite son propre espace mémoire et ses propres cycles de calcul pour traiter le même texte d’entrée.</p>
+<p>Charger quatre modèles massifs pour un seul processus de prédiction crée un goulot d’étranglement inutile, alors que le texte analysé reste identique.</p>
+</section>
+<section id="lapproche-le-multi-task-learning-mtl" class="level2" data-number="2">
+<h2 data-number="2" class="anchored" data-anchor-id="lapproche-le-multi-task-learning-mtl"><span class="header-section-number">2</span> L’approche : le multi-task learning (MTL)</h2>
+<p>L’idée est simple : mutualiser l’intelligence. Au lieu de dupliquer le cerveau (le <em>backbone</em>), nous utilisons un seul socle CamemBERT partagé qui “forke” dynamiquement vers quatre têtes de classification indépendantes.</p>
+<section id="pourquoi-ça-fonctionne" class="level3" data-number="2.1">
+<h3 data-number="2.1" class="anchored" data-anchor-id="pourquoi-ça-fonctionne"><span class="header-section-number">2.1</span> Pourquoi ça fonctionne ?</h3>
+<p>Le <em>Multi-Task Learning</em> permet au modèle d’apprendre des représentations sémantiques communes tout en se spécialisant sur chaque aspect en fin de réseau. Lors de la phase d’entraînement, toutes les pertes (<em>losses</em>) locales de chaque tête sont sommées pour mettre à jour le socle commun.</p>
+</section>
+</section>
+<section id="implémentation-technique-avec-pytorch-lightning" class="level2" data-number="3">
+<h2 data-number="3" class="anchored" data-anchor-id="implémentation-technique-avec-pytorch-lightning"><span class="header-section-number">3</span> Implémentation technique avec PyTorch Lightning</h2>
+<p>L’utilisation de PyTorch Lightning permet d’orchestrer cette architecture complexe de manière élégante. Voici les quatre piliers de la pipeline :</p>
+<ol type="1">
+<li><strong>Allocation unique du socle :</strong> on charge <code>AutoModel.from_pretrained('camembert/camembert-large')</code> une seule fois pour factoriser les blocs d’attention et la tokenization.</li>
+<li><strong>Génération des têtes à la volée :</strong> on utilise un <code>nn.ModuleDict</code> pour mapper les états latents (la sortie du backbone) vers nos quatre labels de sortie.</li>
+<li><strong>Centralisation des features :</strong> on récupère l’état latent du token <code>[CLS]</code> à la fin du traitement du backbone pour nourrir simultanément toutes les têtes.</li>
+<li><strong>Agrégation de la perte :</strong> durant la backpropagation, on somme les pertes individuelles : <code>total_loss += loss</code>.</li>
+</ol>
+<section id="zoom-sur-le-code" class="level3" data-number="3.1">
+<h3 data-number="3.1" class="anchored" data-anchor-id="zoom-sur-le-code"><span class="header-section-number">3.1</span> Zoom sur le code</h3>
+<p>Le fichier <code>plm_classifier.py</code> devient le cœur de votre architecture. En voici l’essentiel :</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> torch.nn <span class="im">as</span> nn</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> transformers <span class="im">import</span> AutoModel</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> MultiHeadClassifier(nn.Module):</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, aspects):</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>        <span class="bu">super</span>().<span class="fu">__init__</span>()</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>        <span class="co"># (1) Le Backbone est factorisé UNE seule fois</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.backbone <span class="op">=</span> AutoModel.from_pretrained(<span class="st">'camembert/camembert-large'</span>)</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>        <span class="co"># (2) Le ModuleDict crée X têtes sans multiplier la VRAM</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.classifiers <span class="op">=</span> nn.ModuleDict({</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>            aspect: nn.Linear(<span class="va">self</span>.backbone.config.hidden_size, <span class="dv">4</span>) </span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>            <span class="cf">for</span> aspect <span class="kw">in</span> aspects</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>        })</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> forward(<span class="va">self</span>, input_ids, attention_mask):</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>        outputs <span class="op">=</span> <span class="va">self</span>.backbone(input_ids<span class="op">=</span>input_ids, attention_mask<span class="op">=</span>attention_mask)</span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>        <span class="co"># On utilise le token [CLS]</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>        cls_output <span class="op">=</span> outputs.last_hidden_state[:, <span class="dv">0</span>, :]</span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>        logits <span class="op">=</span> {aspect: <span class="va">self</span>.classifiers[aspect](cls_output) <span class="cf">for</span> aspect <span class="kw">in</span> <span class="va">self</span>.classifiers}</span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> logits</span></code><button title="Copier vers le presse-papier" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</section>
+</section>
+<section id="stratégie-dadoption-ne-tombez-pas-dans-le-piège" class="level2" data-number="4">
+<h2 data-number="4" class="anchored" data-anchor-id="stratégie-dadoption-ne-tombez-pas-dans-le-piège"><span class="header-section-number">4</span> Stratégie d’adoption : ne tombez pas dans le piège</h2>
+<p>Passer au multi-têtes demande un peu de préparation méthodologique :</p>
+<ul>
+<li><strong>Fusionnez vos datasets :</strong> rassemblez vos jeux de données isolés en un seul dataset combiné où les annotations sont présentées sous forme matricielle.</li>
+<li><strong>Maitrisez le fine-tuning :</strong> implémentez des taux d’apprentissage différentiels (<em>Differential Learning Rates</em>). Utilisez un LR lent pour le backbone (déjà pré-entraîné) et un LR plus agressif pour vos nouvelles têtes afin d’éviter l’oubli catastrophique (<em>Catastrophic Forgetting</em>).</li>
+<li><strong>Abandonnez les classes standards :</strong> débranchez les <code>AutoModelForSequenceClassification</code> classiques du hub HuggingFace. Ils ne sont pas conçus pour gérer plusieurs sorties nativement.</li>
+</ul>
+</section>
+<section id="conclusion-un-gain-massif-en-production" class="level2" data-number="5">
+<h2 data-number="5" class="anchored" data-anchor-id="conclusion-un-gain-massif-en-production"><span class="header-section-number">5</span> Conclusion : un gain massif en production</h2>
+<p>Le passage à une architecture multi-têtes offre des bénéfices immédiats : * <strong>Réduction du temps de chargement :</strong> environ -75% en API. * <strong>Optimisation mémoire :</strong> une consommation RAM quasiment identique à celle d’un seul modèle. * <strong>Débit d’inférence :</strong> une vitesse démultipliée puisque le texte n’est “encodé” qu’une seule fois pour toutes les prédictions.</p>
+<p>Cette architecture est le cœur technique du projet <a href="../reports/feelingsanalysis.html">FeelingsAnalysis</a>.</p>
+</section>
+<section id="références-et-lectures-complémentaires" class="level2" data-number="6">
+<h2 data-number="6" class="anchored" data-anchor-id="références-et-lectures-complémentaires"><span class="header-section-number">6</span> Références et lectures complémentaires</h2>
+<ol type="1">
+<li><strong>Caruana, R.</strong> (1997). <em>Multitask Learning</em>. Machine Learning, 28(1), 41–75. L’article fondateur qui théorise le partage de représentations entre tâches connexes.</li>
+<li><strong>Martin, L., et al.</strong> (2020). <em>CamemBERT: a Tasty French Language Model</em>. Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics. La référence pour l’utilisation du backbone optimisé pour la langue française.</li>
+<li><strong>Wolf, T., et al.</strong> (2020). <em>Transformers: State-of-the-Art Natural Language Processing</em>. Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing. Documentation sur l’écosystème HuggingFace utilisé pour l’implémentation.</li>
+<li><strong>Falcon, W., &amp; The PyTorch Lightning team.</strong> (2019). <em>PyTorch Lightning</em>. GitHub. Framework utilisé pour la structuration du code de recherche et de mise en production.</li>
+<li><strong>Howard, J., &amp; Ruder, S.</strong> (2018). <em>Universal Language Model Fine-tuning for Text Classification</em>. Pour approfondir les stratégies de “Discriminative Fine-Tuning” et éviter l’oubli.</li>
+</ol>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copié");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copié");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

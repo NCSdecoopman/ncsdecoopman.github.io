@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="fr" xml:lang="fr"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.6.36">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Nicolas Decoopman">
+<meta name="keywords" content="Zarr, API, xarray, NetCDF, Data Engineering, Python">
+<meta name="description" content="Le téléchargement à grande échelle de flux géospatiaux et temporels est un défi opérationnel. Voici comment concevoir un pipeline hybride couplant un requêtage Zarr direct à une API de secours avec réalignement spatial dynamique.">
+
+<title>Pourquoi votre pipeline de données géospatiales s’effondre en production : conception d’un système d’ingestion hybride résilient</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="zarr_cds_climate_pipeline_files/libs/clipboard/clipboard.min.js"></script>
+<script src="zarr_cds_climate_pipeline_files/libs/quarto-html/quarto.js"></script>
+<script src="zarr_cds_climate_pipeline_files/libs/quarto-html/popper.min.js"></script>
+<script src="zarr_cds_climate_pipeline_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="zarr_cds_climate_pipeline_files/libs/quarto-html/anchor.min.js"></script>
+<link href="zarr_cds_climate_pipeline_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="zarr_cds_climate_pipeline_files/libs/quarto-html/quarto-syntax-highlighting-01c78b5cd655e4cd89133cf59d535862.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="zarr_cds_climate_pipeline_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="zarr_cds_climate_pipeline_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="zarr_cds_climate_pipeline_files/libs/bootstrap/bootstrap-261c4509c90daf72ddf6c1a7dbf72322.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<style>
+/* Masquer les métadonnées (description, auteur, mots-clés) */
+.quarto-title-meta {
+    display: none !important;
+}
+
+/* Masquer la description visible */
+.description {
+    display: none !important;
+}
+
+/* Masquer les mots-clés visibles */
+.keywords {
+    display: none !important;
+}
+
+.quarto-float-caption {
+    text-align: center !important;
+}
+
+.intro-links {
+    display: flex;
+    flex-direction: column; /* titre au-dessus */
+    align-items: center;
+    justify-content: center;
+    gap: 0.4em;
+    margin-bottom: 1em;
+    font-family: "Segoe UI", Roboto, sans-serif;
+}
+
+.intro-links span.title {
+    font-weight: 600;
+    font-size: 1.2em;
+    letter-spacing: 0.02em;
+}
+
+.icon-links {
+    display: flex;
+    gap: 0.6em;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-links a svg {
+    transition: transform 0.2s ease, fill 0.2s ease;
+}
+
+.icon-links a:hover svg {
+    transform: scale(1.1);
+    fill: #007acc;
+}
+
+.icon {
+width: 24px;
+height: 24px;
+display: inline-block;
+vertical-align: middle;
+}
+
+/* Désactive la grille Quarto pour centrer le contenu */
+#quarto-content {
+    display: block !important;
+}
+
+main.content {
+    margin-left: auto;
+    margin-right: auto;
+    padding: 2rem 4rem;
+    max-width: 1000px;
+    box-sizing: border-box;
+}
+
+body {
+    text-align: justify;
+    font-size: 1.1rem;
+    line-height: 1.7;
+    flex-direction: column;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+nav#TOC {
+    text-align: left !important;
+    min-width: 240px;
+    max-width: 260px;
+    position: fixed;
+    left: calc(50vw - 500px - 280px);
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background-color: #f8f9fa;
+    border-right: 1px solid #ddd;
+    padding: 1rem;
+    font-size: 1rem;
+}
+
+@media screen and (max-width: 1600px) {
+    nav#TOC {
+        left: 0;
+    }
+    main.content {
+        margin-left: 280px;
+        margin-right: 0;
+        max-width: calc(100% - 280px);
+    }
+}
+
+@media screen and (max-width: 767px) {
+    h1, h2, h3 {
+        hyphens: none;
+        word-break: normal;
+    }
+}
+
+/* Formules MathJax responsives */
+.math.display {
+    display: inline-block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+a {
+    word-break: break-word;
+}
+
+table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+@media screen and (max-width: 768px) {
+    nav#TOC {
+        display: none;
+    }
+    main.content {
+        margin-left: 0;
+        padding: 1rem;
+        max-width: 100%;
+    }
+    body {
+        font-size: 1rem;
+        line-height: 1.6;
+        max-width: 100%;
+    }
+}
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const toc = document.querySelector("nav#TOC");
+    if (!toc) return;
+
+    const githubRepo = document.querySelector('meta[name="quarto-report-github"]')?.getAttribute("content")?.trim() || "";
+    function escapeAttr(s) {
+        return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+    const githubSvg = '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><path d="M12 .5c-6.63 0-12 5.37-12 12 0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.726-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.753-1.333-1.753-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.42-1.305.763-1.605-2.665-.305-5.466-1.332-5.466-5.932 0-1.31.468-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.29-1.552 3.296-1.23 3.296-1.23.653 1.653.242 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.803 5.625-5.475 5.922.432.372.816 1.103.816 2.222 0 1.606-.015 2.896-.015 3.286 0 .322.216.694.825.576 4.765-1.586 8.2-6.085 8.2-11.385 0-6.63-5.37-12-12-12z"/></svg>';
+    const githubBlock = githubRepo
+        ? '<a href="' + escapeAttr(githubRepo) + '" title="Voir sur GitHub" target="_blank" rel="noopener" aria-label="Voir sur GitHub">' + githubSvg + "</a>"
+        : "";
+
+    const introLinks = document.createElement("div");
+    introLinks.className = "intro-links";
+
+    introLinks.innerHTML =
+        '<span class="title">{NCS}decoopman</span>' +
+        '<div class="icon-links">' +
+        '<a href="https://ncsdecoopman.github.io/" title="Accueil" aria-label="Page d\'accueil">' +
+        '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24">' +
+        '<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>' +
+        "</svg></a>" +
+        githubBlock +
+        "</div>";
+
+    toc.prepend(introLinks);
+});
+</script>
+
+<!-- Analytics -->
+<script async="" src="https://www.googletagmanager.com/gtag/js?id=G-2YTSV4PT9X"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config','G-2YTSV4PT9X', { 'anonymize_ip': true });
+</script>
+<meta name="quarto-report-github" content="https://github.com/NCSdecoopman/">
+
+
+</head>
+
+<body>
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article toc-left">
+<div id="quarto-sidebar-toc-left" class="sidebar toc-left">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Plan</h2>
+   
+  <ul>
+  <li><a href="#introduction" id="toc-introduction" class="nav-link active" data-scroll-target="#introduction"><span class="header-section-number">1</span> Introduction</a></li>
+  <li><a href="#étapes-techniques-pipeline" id="toc-étapes-techniques-pipeline" class="nav-link" data-scroll-target="#étapes-techniques-pipeline"><span class="header-section-number">2</span> Étapes techniques / Pipeline</a>
+  <ul class="collapse">
+  <li><a href="#régulation-de-lallocation-mémoire-et-parallélisme-dynamique" id="toc-régulation-de-lallocation-mémoire-et-parallélisme-dynamique" class="nav-link" data-scroll-target="#régulation-de-lallocation-mémoire-et-parallélisme-dynamique"><span class="header-section-number">2.1</span> Régulation de l’allocation mémoire et parallélisme dynamique</a></li>
+  <li><a href="#limitation-de-concurrence-et-résilience-aux-erreurs-réseau" id="toc-limitation-de-concurrence-et-résilience-aux-erreurs-réseau" class="nav-link" data-scroll-target="#limitation-de-concurrence-et-résilience-aux-erreurs-réseau"><span class="header-section-number">2.2</span> Limitation de concurrence et résilience aux erreurs réseau</a></li>
+  <li><a href="#extraction-géospatiale-ciblée-zarr-over-http" id="toc-extraction-géospatiale-ciblée-zarr-over-http" class="nav-link" data-scroll-target="#extraction-géospatiale-ciblée-zarr-over-http"><span class="header-section-number">2.3</span> Extraction géospatiale ciblée (Zarr-over-HTTP)</a></li>
+  <li><a href="#algorithme-de-repli-fallback-et-interpolation-à-la-volée" id="toc-algorithme-de-repli-fallback-et-interpolation-à-la-volée" class="nav-link" data-scroll-target="#algorithme-de-repli-fallback-et-interpolation-à-la-volée"><span class="header-section-number">2.4</span> Algorithme de repli (fallback) et interpolation à la volée</a></li>
+  <li><a href="#manifeste-dexécution-thread-safe" id="toc-manifeste-dexécution-thread-safe" class="nav-link" data-scroll-target="#manifeste-dexécution-thread-safe"><span class="header-section-number">2.5</span> Manifeste d’exécution thread-safe</a></li>
+  </ul></li>
+  <li><a href="#stratégie-dadoption" id="toc-stratégie-dadoption" class="nav-link" data-scroll-target="#stratégie-dadoption"><span class="header-section-number">3</span> Stratégie d’adoption</a>
+  <ul class="collapse">
+  <li><a href="#frictions-et-limites-dadoption" id="toc-frictions-et-limites-dadoption" class="nav-link" data-scroll-target="#frictions-et-limites-dadoption"><span class="header-section-number">3.1</span> Frictions et limites d’adoption</a></li>
+  </ul></li>
+  <li><a href="#conclusion" id="toc-conclusion" class="nav-link" data-scroll-target="#conclusion"><span class="header-section-number">4</span> Conclusion</a>
+  <ul class="collapse">
+  <li><a href="#gains-concrets" id="toc-gains-concrets" class="nav-link" data-scroll-target="#gains-concrets"><span class="header-section-number">4.1</span> Gains concrets</a></li>
+  <li><a href="#trade-offs" id="toc-trade-offs" class="nav-link" data-scroll-target="#trade-offs"><span class="header-section-number">4.2</span> Trade-offs</a></li>
+  </ul></li>
+  <li><a href="#références-code" id="toc-références-code" class="nav-link" data-scroll-target="#références-code"><span class="header-section-number">5</span> Références code</a></li>
+  </ul>
+</nav>
+</div>
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar zindex-bottom">
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Pourquoi votre pipeline de données géospatiales s’effondre en production : conception d’un système d’ingestion hybride résilient</h1>
+</div>
+
+<div>
+  <div class="description">
+    Le téléchargement à grande échelle de flux géospatiaux et temporels est un défi opérationnel. Voici comment concevoir un pipeline hybride couplant un requêtage Zarr direct à une API de secours avec réalignement spatial dynamique.
+  </div>
+</div>
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Auteur·rice</div>
+    <div class="quarto-title-meta-contents">
+             <p>Nicolas Decoopman </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Date de publication</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">8 juin 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+<div>
+  <div class="keywords">
+    <div class="block-title">Mots clés</div>
+    <p>Zarr, API, xarray, NetCDF, Data Engineering, Python</p>
+  </div>
+</div>
+
+</header>
+
+
+<p>Le téléchargement et la structuration de dizaines de gigaoctets de données géospatiales et temporelles volumineuses à l’échelle régionale constituent une tâche d’ingénierie des données notoirement fragile. Si les plateformes cloud modernes proposent des magasins Zarr optimisés pour le requêtage direct via HTTP, l’exécution à grande échelle et en parallèle de ces pipelines se heurte à une instabilité réseau chronique : déconnexions intempestives, erreurs HTTP serveur ou encore limitations de quotas. Un simple script d’extraction synchrone ou une boucle naïve de téléchargement finira inévitablement par planter au milieu de la nuit, laissant les tables de caractéristiques incomplètes ou corrompues.</p>
+<p>Pour surmonter ces écueils et garantir une ingestion sans interruption, l’approche mise en œuvre dans ce projet s’appuie sur une double stratégie : un moteur de requêtage parallèle asynchrone sur les magasins Zarr distants doté d’une cascade de résilience, combiné à un mécanisme de repli automatique vers une API officielle de secours. En cas de panne ou de timeout répété sur le Zarr, le système bascule sur cette API alternative, récupère des fichiers de données brutes, puis réalise à la volée une interpolation spatio-temporelle pour aligner et recoller précisément ces données alternatives sur la grille géospatiale de référence, le tout orchestré par un manifeste de téléchargement thread-safe et des contrôles de ressources système dynamiques.</p>
+<section id="introduction" class="level1" data-number="1">
+<h1 data-number="1"><span class="header-section-number">1</span> Introduction</h1>
+<p>Dans le cadre de l’utilisation de données spatio-temporelles multivariées à haute résolution, la précision des données d’entrée est cruciale. Ces flux de données géospatiales représentent de multiples variables physiques indexées dans le temps et l’espace, souvent échantillonnées toutes les heures sur plusieurs décennies.</p>
+<p>Les approches classiques de téléchargement global par des API distantes traditionnelles imposent des temps d’attente extrêmement longs dans des files d’attente partagées au niveau mondial, rendant l’ingestion quotidienne ou les runs de backfill historiques intraitables. L’utilisation de serveurs de données Zarr modernes (Zarr-over-HTTP) résout ce problème de latence en permettant d’extraire de petites zones spatiales (Bounding Boxes) sans lire l’intégralité du dataset mondial. Cependant, ces API Zarr ne tolèrent pas le sur-parallélisme massif. Les requêtes simultanées déclenchent fréquemment des vagues de timeouts et d’erreurs d’accès. Sans contrôle strict de la concurrence, sans gestion intelligente de la mémoire et sans alignement dynamique des grilles spatiales en cas de repli, le pipeline s’effondre.</p>
+</section>
+<section id="étapes-techniques-pipeline" class="level1" data-number="2">
+<h1 data-number="2"><span class="header-section-number">2</span> Étapes techniques / Pipeline</h1>
+<p>Le pipeline d’ingestion s’articule autour de plusieurs phases de résilience pour assurer robustesse et scalabilité.</p>
+<section id="régulation-de-lallocation-mémoire-et-parallélisme-dynamique" class="level2" data-number="2.1">
+<h2 data-number="2.1" class="anchored" data-anchor-id="régulation-de-lallocation-mémoire-et-parallélisme-dynamique"><span class="header-section-number">2.1</span> Régulation de l’allocation mémoire et parallélisme dynamique</h2>
+<p>Afin d’éviter les dépassements de mémoire (Out of Memory - OOM) typiques du traitement parallèle de volumes importants de données matricielles, le pipeline calcule de manière dynamique le nombre de sous-processus de requêtage en fonction de la RAM disponible sur l’hôte, et bride les threads internes des librairies de calcul linéaire pour éliminer la fragmentation.</p>
+<p>En détectant l’environnement matériel, le système adapte son parallélisme au CPU et à la RAM disponibles, limitant les ressources parallèles de requêtage distant sur les configurations contraintes tout en montant en charge sur les serveurs de production ou de calcul distribué.</p>
+</section>
+<section id="limitation-de-concurrence-et-résilience-aux-erreurs-réseau" class="level2" data-number="2.2">
+<h2 data-number="2.2" class="anchored" data-anchor-id="limitation-de-concurrence-et-résilience-aux-erreurs-réseau"><span class="header-section-number">2.2</span> Limitation de concurrence et résilience aux erreurs réseau</h2>
+<p>Pour ne pas saturer l’infrastructure distante, les appels réseau sont protégés par un sémaphore global. De plus, une fonction de traitement des erreurs capture les codes HTTP transitoires et applique un algorithme de retry avec backoff exponentiel après avoir purgé les caches de session et les connexions réseau en cours.</p>
+<p>En enveloppant les lectures dans un gestionnaire de sémaphore et de retries contraint, le pipeline évite d’aggraver les surcharges serveurs et nettoie activement les descripteurs réseau ouverts avant chaque nouvel essai.</p>
+</section>
+<section id="extraction-géospatiale-ciblée-zarr-over-http" class="level2" data-number="2.3">
+<h2 data-number="2.3" class="anchored" data-anchor-id="extraction-géospatiale-ciblée-zarr-over-http"><span class="header-section-number">2.3</span> Extraction géospatiale ciblée (Zarr-over-HTTP)</h2>
+<p>Chaque variable mensuelle est extraite à partir d’une région géographique (Bounding Box) passée en paramètre, en effectuant un découpage spatial (slicing) direct sur le magasin Zarr distant ouvert de manière paresseuse, réduisant la consommation de bande passante au strict minimum. Le chargement en mémoire et l’écriture locale ne sont ainsi effectués que sur les coordonnées géographiques pertinentes.</p>
+</section>
+<section id="algorithme-de-repli-fallback-et-interpolation-à-la-volée" class="level2" data-number="2.4">
+<h2 data-number="2.4" class="anchored" data-anchor-id="algorithme-de-repli-fallback-et-interpolation-à-la-volée"><span class="header-section-number">2.4</span> Algorithme de repli (fallback) et interpolation à la volée</h2>
+<p>Si le magasin Zarr distant échoue de manière répétée malgré la cascade de tentatives, la fonction parente attrape l’erreur et bascule vers l’API de secours. Cette API alternative renvoie des grilles globales ou régionales dont les coordonnées, l’orientation latitudinale ou les dimensions temporelles ne s’alignent pas directement avec les fichiers de référence. Le pipeline applique donc une interpolation linéaire dynamique de la grille téléchargée vers la grille géographique de référence.</p>
+<p>Ce module d’interpolation résout le problème classique du changement de fournisseur ou de format de données en production (schema / spatial drift). L’interpolation spatio-temporelle garantit qu’indépendamment de la source finale, le fichier produit localement possède exactement les mêmes dimensions, coordonnées de grille géométrique et pas de temps.</p>
+</section>
+<section id="manifeste-dexécution-thread-safe" class="level2" data-number="2.5">
+<h2 data-number="2.5" class="anchored" data-anchor-id="manifeste-dexécution-thread-safe"><span class="header-section-number">2.5</span> Manifeste d’exécution thread-safe</h2>
+<p>La gestion globale de l’ingestion s’appuie sur un fichier manifeste mis à jour de manière thread-safe à l’aide d’un verrou d’exclusion mutuelle. Ce manifeste conserve non seulement la liste des blocs de données validés pour éviter de retélécharger les éléments existants, mais documente également la provenance de la donnée (source principale ou alternative), assurant la traçabilité et la possibilité de reprendre les traitements exactement là où ils se sont arrêtés en cas d’interruption.</p>
+</section>
+</section>
+<section id="stratégie-dadoption" class="level1" data-number="3">
+<h1 data-number="3"><span class="header-section-number">3</span> Stratégie d’adoption</h1>
+<p>Pour implémenter cette architecture hybride de téléchargement géospatiale :</p>
+<ol type="1">
+<li><strong>Définir un référentiel spatial strict</strong> : Générez ou téléchargez un unique fichier de référence contenant la grille géographique (latitudes, longitudes) que vos modèles avals consomment.</li>
+<li><strong>Implémenter une interface de téléchargement unifiée</strong> : Créez des wrappers pour vos différentes API d’accès afin de renvoyer le même type de retour.</li>
+<li><strong>Encapsuler les requêtes fragiles</strong> : Isolez vos modules réseau instables à l’aide de verrous ou de sémaphores locaux pour réguler le trafic, et d’un bloc de capture d’erreur chargé de purger les caches ou de fermer les connexions en cas d’erreur transitoire.</li>
+<li><strong>Automatiser le regridding à la volée</strong> : Intégrez une étape systématique d’interpolation spatio-temporelle lors de l’utilisation d’une source alternative pour projeter et forcer ses coordonnées sur le référentiel strict.</li>
+<li><strong>Persister un manifeste d’avancement</strong> : Ne vous fiez pas seulement à la présence physique d’un fichier sur disque pour vérifier l’intégrité de vos extractions. Le manifeste persisté doit lister les blocs validés avec leurs variables et leur provenance.</li>
+</ol>
+<section id="frictions-et-limites-dadoption" class="level2" data-number="3.1">
+<h2 data-number="3.1" class="anchored" data-anchor-id="frictions-et-limites-dadoption"><span class="header-section-number">3.1</span> Frictions et limites d’adoption</h2>
+<ul>
+<li><strong>Coût CPU et latence de l’interpolation</strong> : Regridder à la volée de grandes matrices via Xarray est une opération coûteuse en calcul. En cas de repli massif sur la source alternative, le temps processeur augmente de manière non négligeable.</li>
+<li><strong>Complexité de maintenance multi-fournisseurs</strong> : Développer un pipeline hybride exige de maintenir deux types d’authentification et de surveiller l’évolution des deux schémas de données amont pour éviter les ruptures de connecteurs.</li>
+<li><strong>Perte de précision par extrapolation</strong> : L’interpolation linéaire peut induire des micro-variations numériques par rapport aux valeurs natives de la source alternative. Il est indispensable de monitorer ces écarts pour s’assurer qu’ils ne dégradent pas les performances des modèles de calcul avals.</li>
+</ul>
+</section>
+</section>
+<section id="conclusion" class="level1" data-number="4">
+<h1 data-number="4"><span class="header-section-number">4</span> Conclusion</h1>
+<section id="gains-concrets" class="level2" data-number="4.1">
+<h2 data-number="4.1" class="anchored" data-anchor-id="gains-concrets"><span class="header-section-number">4.1</span> Gains concrets</h2>
+<ul>
+<li><strong>Disponibilité opérationnelle de 100%</strong> : Le pipeline absorbe de manière transparente les indisponibilités de la source principale sans planter le run de production.</li>
+<li><strong>Consommation réseau maîtrisée</strong> : En priorisant le requêtage ciblé par Bounding Box via Zarr HTTP, le pipeline évite le transfert inutile de fichiers géospatiaux globaux dans la majorité des cas.</li>
+<li><strong>Idempotence complète</strong> : La combinaison d’un manifeste persisté thread-safe et d’un verrou global permet d’interrompre et de reprendre les flux d’extraction sans risque de corruption de données ou de double-facturation API.</li>
+</ul>
+</section>
+<section id="trade-offs" class="level2" data-number="4.2">
+<h2 data-number="4.2" class="anchored" data-anchor-id="trade-offs"><span class="header-section-number">4.2</span> Trade-offs</h2>
+<ul>
+<li><strong>Dette de code accrue</strong> : L’intégration d’un sous-système complet de regridding et d’alignement spatial complexifie la base de code d’extraction, nécessitant des compétences poussées en manipulation de tenseurs géospatiaux (Xarray/Dask) pour l’équipe qui hérite du code.</li>
+<li><strong>Journalisation verbeuse</strong> : La cascade de replis et de retries génère un volume important de logs, ce qui impose de structurer finement l’observabilité (gestion des niveaux de log) sous peine de saturer les moniteurs d’alertes en production.</li>
+</ul>
+</section>
+</section>
+<section id="références-code" class="level1" data-number="5">
+<h1 data-number="5"><span class="header-section-number">5</span> Références code</h1>
+<ul>
+<li><strong>Gestionnaire de parallélisme</strong><br>
+Gère dynamiquement le parallélisme et la charge mémoire (workers et threads) en fonction de la RAM disponible sur l’hôte.</li>
+<li><strong>Module de résilience réseau</strong><br>
+Contient la logique de retry exponentiel et le sémaphore limitant la concurrence réseau sur les serveurs distants.</li>
+<li><strong>Extracteur géospatial ciblé</strong><br>
+Réalise le requêtage ciblé spatio-temporel directement sur les magasins distants Zarr HTTP de la source principale.</li>
+<li><strong>Module d’alignement spatial</strong><br>
+Implémente le téléchargement de repli via l’API alternative et le regridding spatial par interpolation linéaire vers la grille géospatiale de référence.</li>
+<li><strong>Orchestrateur de pipeline</strong><br>
+Orchestre le pipeline global, gère le pool de threads et synchronise les écritures de statut dans le manifeste.</li>
+<li><strong>Manifeste d’exécution</strong><br>
+Structure de données persistée en JSON représentant l’avancement et la provenance (source principale ou alternative) de chaque bloc téléchargé.</li>
+</ul>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copié");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copié");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

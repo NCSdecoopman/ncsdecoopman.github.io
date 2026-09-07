@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+Allow: /a-propos
+Sitemap: https://ncsdecoopman.github.io/sitemap.xml
