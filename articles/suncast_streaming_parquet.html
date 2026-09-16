@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="fr" xml:lang="fr"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.6.36">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Nicolas Decoopman">
+<meta name="keywords" content="Géospatial, Production, HPC, C++17, GDAL, OpenMP, Parquet, PyArrow, Streaming, subprocess, Slurm, MNT">
+<meta name="description" content="Réduisez la pression disque et simplifiez l’aval analytique en branchant un binaire GDAL/OpenMP sur un pipe binaire strict, consommé par PyArrow en un RecordBatch Parquet par jour.">
+
+<title>Arrêtez de saturer le disque avec des GeoTIFF annuels : comment SunCast streame du Parquet sans corrompre stdout</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="suncast_streaming_parquet_files/libs/clipboard/clipboard.min.js"></script>
+<script src="suncast_streaming_parquet_files/libs/quarto-html/quarto.js"></script>
+<script src="suncast_streaming_parquet_files/libs/quarto-html/popper.min.js"></script>
+<script src="suncast_streaming_parquet_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="suncast_streaming_parquet_files/libs/quarto-html/anchor.min.js"></script>
+<link href="suncast_streaming_parquet_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="suncast_streaming_parquet_files/libs/quarto-html/quarto-syntax-highlighting-01c78b5cd655e4cd89133cf59d535862.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="suncast_streaming_parquet_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="suncast_streaming_parquet_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="suncast_streaming_parquet_files/libs/bootstrap/bootstrap-261c4509c90daf72ddf6c1a7dbf72322.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<style>
+/* Masquer les métadonnées (description, auteur, mots-clés) */
+.quarto-title-meta {
+    display: none !important;
+}
+
+/* Masquer la description visible */
+.description {
+    display: none !important;
+}
+
+/* Masquer les mots-clés visibles */
+.keywords {
+    display: none !important;
+}
+
+.quarto-float-caption {
+    text-align: center !important;
+}
+
+.intro-links {
+    display: flex;
+    flex-direction: column; /* titre au-dessus */
+    align-items: center;
+    justify-content: center;
+    gap: 0.4em;
+    margin-bottom: 1em;
+    font-family: "Segoe UI", Roboto, sans-serif;
+}
+
+.intro-links span.title {
+    font-weight: 600;
+    font-size: 1.2em;
+    letter-spacing: 0.02em;
+}
+
+.icon-links {
+    display: flex;
+    gap: 0.6em;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-links a svg {
+    transition: transform 0.2s ease, fill 0.2s ease;
+}
+
+.icon-links a:hover svg {
+    transform: scale(1.1);
+    fill: #007acc;
+}
+
+.icon {
+width: 24px;
+height: 24px;
+display: inline-block;
+vertical-align: middle;
+}
+
+/* Désactive la grille Quarto pour centrer le contenu */
+#quarto-content {
+    display: block !important;
+}
+
+main.content {
+    margin-left: auto;
+    margin-right: auto;
+    padding: 2rem 4rem;
+    max-width: 1000px;
+    box-sizing: border-box;
+}
+
+body {
+    text-align: justify;
+    font-size: 1.1rem;
+    line-height: 1.7;
+    flex-direction: column;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+nav#TOC {
+    text-align: left !important;
+    min-width: 240px;
+    max-width: 260px;
+    position: fixed;
+    left: calc(50vw - 500px - 280px);
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background-color: #f8f9fa;
+    border-right: 1px solid #ddd;
+    padding: 1rem;
+    font-size: 1rem;
+}
+
+@media screen and (max-width: 1600px) {
+    nav#TOC {
+        left: 0;
+    }
+    main.content {
+        margin-left: 280px;
+        margin-right: 0;
+        max-width: calc(100% - 280px);
+    }
+}
+
+@media screen and (max-width: 767px) {
+    h1, h2, h3 {
+        hyphens: none;
+        word-break: normal;
+    }
+}
+
+/* Formules MathJax responsives */
+.math.display {
+    display: inline-block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+a {
+    word-break: break-word;
+}
+
+table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+@media screen and (max-width: 768px) {
+    nav#TOC {
+        display: none;
+    }
+    main.content {
+        margin-left: 0;
+        padding: 1rem;
+        max-width: 100%;
+    }
+    body {
+        font-size: 1rem;
+        line-height: 1.6;
+        max-width: 100%;
+    }
+}
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const toc = document.querySelector("nav#TOC");
+    if (!toc) return;
+
+    const githubRepo = document.querySelector('meta[name="quarto-report-github"]')?.getAttribute("content")?.trim() || "";
+    function escapeAttr(s) {
+        return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+    const githubSvg = '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"><path d="M12 .5c-6.63 0-12 5.37-12 12 0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.726-4.042-1.61-4.042-1.61-.546-1.385-1.333-1.753-1.333-1.753-1.09-.745.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.42-1.305.763-1.605-2.665-.305-5.466-1.332-5.466-5.932 0-1.31.468-2.382 1.235-3.222-.124-.303-.535-1.523.117-3.176 0 0 1.008-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.29-1.552 3.296-1.23 3.296-1.23.653 1.653.242 2.873.12 3.176.77.84 1.233 1.912 1.233 3.222 0 4.61-2.803 5.625-5.475 5.922.432.372.816 1.103.816 2.222 0 1.606-.015 2.896-.015 3.286 0 .322.216.694.825.576 4.765-1.586 8.2-6.085 8.2-11.385 0-6.63-5.37-12-12-12z"/></svg>';
+    const githubBlock = githubRepo
+        ? '<a href="' + escapeAttr(githubRepo) + '" title="Voir sur GitHub" target="_blank" rel="noopener" aria-label="Voir sur GitHub">' + githubSvg + "</a>"
+        : "";
+
+    const introLinks = document.createElement("div");
+    introLinks.className = "intro-links";
+
+    introLinks.innerHTML =
+        '<span class="title">{NCS}decoopman</span>' +
+        '<div class="icon-links">' +
+        '<a href="https://ncsdecoopman.github.io/" title="Accueil" aria-label="Page d\'accueil">' +
+        '<svg class="icon" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24">' +
+        '<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>' +
+        "</svg></a>" +
+        githubBlock +
+        "</div>";
+
+    toc.prepend(introLinks);
+});
+</script>
+
+<!-- Analytics -->
+<script async="" src="https://www.googletagmanager.com/gtag/js?id=G-2YTSV4PT9X"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config','G-2YTSV4PT9X', { 'anonymize_ip': true });
+</script>
+<meta name="quarto-report-github" content="https://github.com/NCSdecoopman/SunCast">
+
+
+</head>
+
+<body>
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article toc-left">
+<div id="quarto-sidebar-toc-left" class="sidebar toc-left">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Plan</h2>
+   
+  <ul>
+  <li><a href="#le-problème-le-disque-et-le-format-ne-suffisent-pas" id="toc-le-problème-le-disque-et-le-format-ne-suffisent-pas" class="nav-link active" data-scroll-target="#le-problème-le-disque-et-le-format-ne-suffisent-pas"><span class="header-section-number">1</span> Le problème : le disque et le format ne suffisent pas</a></li>
+  <li><a href="#lapproche-un-protocole-binaire-maison-sur-stdout" id="toc-lapproche-un-protocole-binaire-maison-sur-stdout" class="nav-link" data-scroll-target="#lapproche-un-protocole-binaire-maison-sur-stdout"><span class="header-section-number">2</span> L’approche : un protocole binaire maison sur stdout</a>
+  <ul class="collapse">
+  <li><a href="#pourquoi-cest-pertinent-en-production" id="toc-pourquoi-cest-pertinent-en-production" class="nav-link" data-scroll-target="#pourquoi-cest-pertinent-en-production"><span class="header-section-number">2.1</span> Pourquoi c’est pertinent en production ?</a></li>
+  </ul></li>
+  <li><a href="#implémentation-technique-du-producteur-au-consommateur" id="toc-implémentation-technique-du-producteur-au-consommateur" class="nav-link" data-scroll-target="#implémentation-technique-du-producteur-au-consommateur"><span class="header-section-number">3</span> Implémentation technique : du producteur au consommateur</a>
+  <ul class="collapse">
+  <li><a href="#point-dentrée-c---stream-et-discipline-stdout" id="toc-point-dentrée-c---stream-et-discipline-stdout" class="nav-link" data-scroll-target="#point-dentrée-c---stream-et-discipline-stdout"><span class="header-section-number">3.1</span> Point d’entrée C++ : <code>--stream</code> et discipline stdout</a></li>
+  <li><a href="#en-tête-puis-blocs-journaliers-côté-processdem" id="toc-en-tête-puis-blocs-journaliers-côté-processdem" class="nav-link" data-scroll-target="#en-tête-puis-blocs-journaliers-côté-processdem"><span class="header-section-number">3.2</span> En-tête puis blocs journaliers côté <code>ProcessDEM</code></a></li>
+  <li><a href="#consommateur-python-read_exact-schéma-une-ligne-parquet-par-jour" id="toc-consommateur-python-read_exact-schéma-une-ligne-parquet-par-jour" class="nav-link" data-scroll-target="#consommateur-python-read_exact-schéma-une-ligne-parquet-par-jour"><span class="header-section-number">3.3</span> Consommateur Python : <code>read_exact</code>, schéma, une ligne Parquet par jour</a></li>
+  <li><a href="#une-leçon-de-contrat-vivant" id="toc-une-leçon-de-contrat-vivant" class="nav-link" data-scroll-target="#une-leçon-de-contrat-vivant"><span class="header-section-number">3.4</span> Une leçon de « contrat vivant »</a></li>
+  </ul></li>
+  <li><a href="#stratégie-dadoption-ne-pas-improviser-le-binaire" id="toc-stratégie-dadoption-ne-pas-improviser-le-binaire" class="nav-link" data-scroll-target="#stratégie-dadoption-ne-pas-improviser-le-binaire"><span class="header-section-number">4</span> Stratégie d’adoption : ne pas improviser le binaire</a></li>
+  <li><a href="#conclusion-gains-concrets-et-compromis" id="toc-conclusion-gains-concrets-et-compromis" class="nav-link" data-scroll-target="#conclusion-gains-concrets-et-compromis"><span class="header-section-number">5</span> Conclusion : gains concrets et compromis</a></li>
+  <li><a href="#références-et-lectures-complémentaires" id="toc-références-et-lectures-complémentaires" class="nav-link" data-scroll-target="#références-et-lectures-complémentaires"><span class="header-section-number">6</span> Références et lectures complémentaires</a></li>
+  </ul>
+</nav>
+</div>
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar zindex-bottom">
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Arrêtez de saturer le disque avec des GeoTIFF annuels : comment SunCast streame du Parquet sans corrompre stdout</h1>
+</div>
+
+<div>
+  <div class="description">
+    Réduisez la pression disque et simplifiez l’aval analytique en branchant un binaire GDAL/OpenMP sur un pipe binaire strict, consommé par PyArrow en un RecordBatch Parquet par jour.
+  </div>
+</div>
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Auteur·rice</div>
+    <div class="quarto-title-meta-contents">
+             <p>Nicolas Decoopman </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Date de publication</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">17 avril 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+<div>
+  <div class="keywords">
+    <div class="block-title">Mots clés</div>
+    <p>Géospatial, Production, HPC, C++17, GDAL, OpenMP, Parquet, PyArrow, Streaming, subprocess, Slurm, MNT</p>
+  </div>
+</div>
+
+</header>
+
+
+<p>Imaginez que vous deviez publier, pour chaque département français, une <strong>grille raster complète</strong> des heures de lever et de coucher du soleil sur <strong>365 ou 366 jours</strong>, à la résolution d’un MNT.</p>
+<p>L’approche « fichier unique » mène vite à un <strong>GeoTIFF annuel</strong> avec des centaines de bandes : techniquement viable (GDAL, tuiles, <code>BIGTIFF=IF_NEEDED</code>), mais lourd pour le stockage, peu pratique pour l’analyse tabulaire, et pénible à versionner ou à pousser sur un cluster.</p>
+<p><strong>SunCast</strong> propose une autre voie : garder le moteur numérique en <strong>C++/GDAL/OpenMP</strong>, mais <strong>éjecter les résultats jour par jour</strong> vers Python via un <strong>flux binaire sur stdout</strong>, puis matérialiser du <strong>Parquet</strong> compressé (Snappy) avec PyArrow, sans écrire d’énorme raster intermédiaire.</p>
+<p>Voici pourquoi <strong>stdout devient un contrat</strong>, et comment le code évite de le corrompre.</p>
+<section id="le-problème-le-disque-et-le-format-ne-suffisent-pas" class="level2" data-number="1">
+<h2 data-number="1" class="anchored" data-anchor-id="le-problème-le-disque-et-le-format-ne-suffisent-pas"><span class="header-section-number">1</span> Le problème : le disque et le format ne suffisent pas</h2>
+<p>Pour beaucoup d’équipes géo ou climat, le réflexe est d’écrire un raster géoréférencé par bande ou par paire lever/coucher. Chaque pixel porte une information fine (minutes depuis minuit, souvent en <code>int16</code>), mais le <strong>produit dérivé</strong> est un cube énorme : largeur × hauteur × nombre de bandes × précision.</p>
+<p>Même bien compressé (LZW, tuiles 512×512), cela reste un <strong>artefact monolithique</strong>. Pour l’aval data (jointures, filtres par jour, agrégations hors outils raster), on se retrouve à <strong>ré-encoder</strong> ou à multiplier les copies sur disque partagé HPC.</p>
+<p>Le goulot n’est pas seulement la CPU : c’est le <strong>cycle de vie des fichiers</strong> entre le binaire natif et l’orchestration Python.</p>
+</section>
+<section id="lapproche-un-protocole-binaire-maison-sur-stdout" class="level2" data-number="2">
+<h2 data-number="2" class="anchored" data-anchor-id="lapproche-un-protocole-binaire-maison-sur-stdout"><span class="header-section-number">2</span> L’approche : un protocole binaire maison sur stdout</h2>
+<p>L’idée est de <strong>séparer les canaux</strong> :</p>
+<ul>
+<li><strong>stdout</strong> : uniquement des octets structurés (magic, dimensions, géotransform, puis blocs jour par jour).</li>
+<li><strong>stderr</strong> : messages humains (démarrage, progression, erreurs).</li>
+</ul>
+<p>Le binaire <code>solar_calculator</code> expose <code>--stream</code> : sans <code>--output</code>, il ne produit pas de GeoTIFF annuel ; il appelle <code>DemProcessor::streamBinaryOutput</code> et pousse le flux vers stdout. Côté Python, <code>run_solar_parquet.py</code> ouvre un <code>subprocess.Popen</code> avec <code>stdout=subprocess.PIPE</code>, lit <strong>exactement</strong> le nombre d’octets attendu à chaque étape, et écrit <strong>un <code>RecordBatch</code> Parquet par jour</strong>.</p>
+<section id="pourquoi-cest-pertinent-en-production" class="level3" data-number="2.1">
+<h3 data-number="2.1" class="anchored" data-anchor-id="pourquoi-cest-pertinent-en-production"><span class="header-section-number">2.1</span> Pourquoi c’est pertinent en production ?</h3>
+<ol type="1">
+<li><strong>Mémoire Python bornée</strong> : on ne matérialise jamais l’année entière en tableaux Python ; une journée à la fois suffit pour <code>write_batch</code>.</li>
+<li><strong>Échec rapide</strong> : si le process C++ meurt au milieu du flux, la lecture stricte lève une erreur au lieu d’écrire un Parquet silencieusement incohérent.</li>
+<li><strong>HPC</strong> : le script Slurm du dépôt lance <code>python -m src.solar.run_solar_parquet --index …</code> : chaque tâche array consomme le même pattern (binaire + pipe + partition <code>dept=</code>).</li>
+</ol>
+</section>
+</section>
+<section id="implémentation-technique-du-producteur-au-consommateur" class="level2" data-number="3">
+<h2 data-number="3" class="anchored" data-anchor-id="implémentation-technique-du-producteur-au-consommateur"><span class="header-section-number">3</span> Implémentation technique : du producteur au consommateur</h2>
+<section id="point-dentrée-c---stream-et-discipline-stdout" class="level3" data-number="3.1">
+<h3 data-number="3.1" class="anchored" data-anchor-id="point-dentrée-c---stream-et-discipline-stdout"><span class="header-section-number">3.1</span> Point d’entrée C++ : <code>--stream</code> et discipline stdout</h3>
+<p>La validation impose <code>--output</code> sauf en mode stream ; en stream, la configuration verbeuse évite <code>std::cout</code> pour ne pas polluer le flux binaire (seul <code>std::cerr</code> annonce le démarrage).</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="op">(!</span>streamMode <span class="op">&amp;&amp;</span> outputPath<span class="op">.</span>empty<span class="op">())</span> <span class="op">{</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="bu">std::</span>cerr <span class="op">&lt;&lt;</span> <span class="st">"Error: Output file is required (--output) unless in --stream mode"</span> <span class="op">&lt;&lt;</span> <span class="bu">std::</span>endl<span class="op">;</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    printUsage<span class="op">(</span>argv<span class="op">[</span><span class="dv">0</span><span class="op">]);</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="dv">1</span><span class="op">;</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="co">// ...</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="op">(</span>streamMode<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    <span class="bu">std::</span>cerr <span class="op">&lt;&lt;</span> <span class="st">"Starting binary stream for "</span> <span class="op">&lt;&lt;</span> inputPath <span class="op">&lt;&lt;</span> <span class="st">" (Year "</span> <span class="op">&lt;&lt;</span> year <span class="op">&lt;&lt;</span> <span class="st">")"</span> <span class="op">&lt;&lt;</span> <span class="bu">std::</span>endl<span class="op">;</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    success <span class="op">=</span> processor<span class="op">.</span>streamBinaryOutput<span class="op">(</span>inputPath<span class="op">,</span> year<span class="op">,</span> timezoneOffset<span class="op">);</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code><button title="Copier vers le presse-papier" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><em>(Fichier <code>src/main.cpp</code>.)</em></p>
+</section>
+<section id="en-tête-puis-blocs-journaliers-côté-processdem" class="level3" data-number="3.2">
+<h3 data-number="3.2" class="anchored" data-anchor-id="en-tête-puis-blocs-journaliers-côté-processdem"><span class="header-section-number">3.2</span> En-tête puis blocs journaliers côté <code>ProcessDEM</code></h3>
+<p>Après lecture du MNT en mémoire et calcul du nombre de jours (bissextile), le producteur écrit :</p>
+<ol type="1">
+<li>Cinq octets magiques <code>SOLAR</code>.</li>
+<li><code>width</code>, <code>height</code>, <code>daysInYear</code> en <code>int32</code>.</li>
+<li>Six <code>double</code> de géotransform GDAL.</li>
+<li>Pour chaque jour calendaire : <code>currentDayOfYear</code> (<code>int32</code>), puis deux tableaux <code>int16</code> de <code>width × height</code> minutes (sentinel <code>-1</code> pour nodata ou cas non calculables).</li>
+</ol>
+<p>OpenMP parallélise le calcul <strong>par jour</strong> ; après chaque jour, <code>std::cout.flush()</code> vide le buffer vers le pipe. La progression (<code>Processed day …</code>) part sur <strong>stderr</strong> tous les dix jours.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="at">const</span> <span class="dt">char</span> magic<span class="op">[]</span> <span class="op">=</span> <span class="st">"SOLAR"</span><span class="op">;</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>write<span class="op">(</span>magic<span class="op">,</span> <span class="dv">5</span><span class="op">);</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>write<span class="op">(</span><span class="kw">reinterpret_cast</span><span class="op">&lt;</span><span class="at">const</span> <span class="dt">char</span><span class="op">*&gt;(&amp;</span>width<span class="op">),</span> <span class="kw">sizeof</span><span class="op">(</span><span class="dt">int32_t</span><span class="op">));</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>write<span class="op">(</span><span class="kw">reinterpret_cast</span><span class="op">&lt;</span><span class="at">const</span> <span class="dt">char</span><span class="op">*&gt;(&amp;</span>height<span class="op">),</span> <span class="kw">sizeof</span><span class="op">(</span><span class="dt">int32_t</span><span class="op">));</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>write<span class="op">(</span><span class="kw">reinterpret_cast</span><span class="op">&lt;</span><span class="at">const</span> <span class="dt">char</span><span class="op">*&gt;(&amp;</span>daysInYear<span class="op">),</span> <span class="kw">sizeof</span><span class="op">(</span><span class="dt">int32_t</span><span class="op">));</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>write<span class="op">(</span><span class="kw">reinterpret_cast</span><span class="op">&lt;</span><span class="at">const</span> <span class="dt">char</span><span class="op">*&gt;(</span>geoTransform<span class="op">),</span> <span class="dv">6</span> <span class="op">*</span> <span class="kw">sizeof</span><span class="op">(</span><span class="dt">double</span><span class="op">));</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>flush<span class="op">();</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="co">// … pour chaque jour …</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>write<span class="op">(</span><span class="kw">reinterpret_cast</span><span class="op">&lt;</span><span class="at">const</span> <span class="dt">char</span><span class="op">*&gt;(&amp;</span>currentDayOfYear<span class="op">),</span> <span class="kw">sizeof</span><span class="op">(</span><span class="dt">int32_t</span><span class="op">));</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>write<span class="op">(</span><span class="kw">reinterpret_cast</span><span class="op">&lt;</span><span class="at">const</span> <span class="dt">char</span><span class="op">*&gt;(</span>sunriseBuffer<span class="op">),</span> totalPixels <span class="op">*</span> <span class="kw">sizeof</span><span class="op">(</span><span class="dt">int16_t</span><span class="op">));</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>write<span class="op">(</span><span class="kw">reinterpret_cast</span><span class="op">&lt;</span><span class="at">const</span> <span class="dt">char</span><span class="op">*&gt;(</span>sunsetBuffer<span class="op">),</span> totalPixels <span class="op">*</span> <span class="kw">sizeof</span><span class="op">(</span><span class="dt">int16_t</span><span class="op">));</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>cout<span class="op">.</span>flush<span class="op">();</span></span></code><button title="Copier vers le presse-papier" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><em>(Fichier <code>src/ProcessDEM.cpp</code>, fonction <code>streamBinaryOutput</code>.)</em></p>
+<p>Le compromis explicite : <strong>un <code>flush</code> par jour</strong> augmente le coût en syscalls, mais le consommateur avance de façon synchronisée et une panne laisse une trace plus localisable qu’un énorme buffer noyé.</p>
+</section>
+<section id="consommateur-python-read_exact-schéma-une-ligne-parquet-par-jour" class="level3" data-number="3.3">
+<h3 data-number="3.3" class="anchored" data-anchor-id="consommateur-python-read_exact-schéma-une-ligne-parquet-par-jour"><span class="header-section-number">3.3</span> Consommateur Python : <code>read_exact</code>, schéma, une ligne Parquet par jour</h3>
+<p><code>stderr</code> du sous-processus est relié à <code>sys.stderr</code> : les logs C++ passent au terminal sans être mélangés au parseur binaire qui ne lit que <code>proc.stdout</code>.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> read_exact(proc, size):</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    data <span class="op">=</span> proc.stdout.read(size)</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="bu">len</span>(data) <span class="op">&lt;</span> size:</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">raise</span> <span class="pp">EOFError</span>(<span class="ss">f"Expected </span><span class="sc">{</span>size<span class="sc">}</span><span class="ss"> bytes, got </span><span class="sc">{</span><span class="bu">len</span>(data)<span class="sc">}</span><span class="ss">"</span>)</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> data</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>proc <span class="op">=</span> subprocess.Popen(</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>    cmd,</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>    stdout<span class="op">=</span>subprocess.PIPE,</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>    stderr<span class="op">=</span>sys.stderr,</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>    bufsize<span class="op">=</span><span class="dv">1024</span> <span class="op">*</span> <span class="dv">1024</span>,</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copier vers le presse-papier" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>Le schéma Parquet encode chaque jour comme une ligne avec deux colonnes <code>list&lt;int16&gt;</code> de longueur <code>width*height</code>. Chaque itération construit un <code>RecordBatch</code> unique et appelle <code>writer.write_batch(batch)</code> avec compression Snappy.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>schema <span class="op">=</span> pa.schema([</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>    (<span class="st">'day'</span>, pa.int32()),</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    (<span class="st">'sunrise'</span>, pa.list_(pa.int16())),</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    (<span class="st">'sunset'</span>, pa.list_(pa.int16())),</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>])</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>writer <span class="op">=</span> pq.ParquetWriter(parquet_file, schema, compression<span class="op">=</span><span class="st">'snappy'</span>)</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> _ <span class="kw">in</span> <span class="bu">range</span>(days_in_year):</span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    day_id <span class="op">=</span> struct.unpack(<span class="st">'i'</span>, read_exact(proc, <span class="dv">4</span>))[<span class="dv">0</span>]</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>    sunrise_bytes <span class="op">=</span> read_exact(proc, array_bytes)</span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>    sunrise_array <span class="op">=</span> np.frombuffer(sunrise_bytes, dtype<span class="op">=</span>np.int16)</span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>    <span class="co"># … idem sunset …</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>    batch <span class="op">=</span> pa.RecordBatch.from_arrays([…], schema<span class="op">=</span>schema)</span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>    writer.write_batch(batch)</span></code><button title="Copier vers le presse-papier" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><em>(Fichier <code>src/solar/run_solar_parquet.py</code>.)</em></p>
+<p>Les partitions Hive-style (<code>data/parquet/dept=&lt;code&gt;/data.parquet</code>) et un <code>metadata.json</code> (dimensions, géotransform) complètent le livrable pour la viz ou les jointures spatiales ultérieures.</p>
+</section>
+<section id="une-leçon-de-contrat-vivant" class="level3" data-number="3.4">
+<h3 data-number="3.4" class="anchored" data-anchor-id="une-leçon-de-contrat-vivant"><span class="header-section-number">3.4</span> Une leçon de « contrat vivant »</h3>
+<p>Tout message de diagnostic en mode stream doit vivre sur <strong>stderr</strong>. Le constructeur <code>DemProcessor</code> logue l’état OpenMP sur <code>std::cerr</code> dans tous les cas : sans cela, un simple <code>std::cout</code> émis avant le flux aurait cassé le magic <code>SOLAR</code>, exactement le genre de bug que l’on voit quand la toolchain cluster diffère de la machine de développement.</p>
+<p>Le commentaire de <code>ProcessDEM.h</code> décrit désormais le même en-tête et la même structure par jour que le code : la <strong>source de vérité</strong> reste l’implémentation et le lecteur Python, mais la doc d’en-tête suit.</p>
+</section>
+</section>
+<section id="stratégie-dadoption-ne-pas-improviser-le-binaire" class="level2" data-number="4">
+<h2 data-number="4" class="anchored" data-anchor-id="stratégie-dadoption-ne-pas-improviser-le-binaire"><span class="header-section-number">4</span> Stratégie d’adoption : ne pas improviser le binaire</h2>
+<ul>
+<li><strong>Spécifier le protocole</strong> : endianness (implicitement celle de la plateforme pour <code>struct</code> Python et écritures natives C++), taille des blocs, comportement sur nodata (<code>-1</code>).</li>
+<li><strong>Tests d’intégration légers</strong> : golden file sur les N premiers jours ou contrôle des longueurs de listes (le dépôt fournit <code>src/utils/inspect_parquet.py</code> pour un smoke test rapide).</li>
+<li><strong>Règle d’équipe</strong> : interdiction de <code>std::cout</code> dans le chemin partagé constructeur / bibliothèques quand <code>--stream</code> existe ; revue de code ou grep en CI.</li>
+<li><strong>Slurm</strong> : aligner <code>--array</code> sur la liste des départements cibles dans <code>src/config.py</code>, comme le script <code>submit_job.slurm</code>.</li>
+</ul>
+</section>
+<section id="conclusion-gains-concrets-et-compromis" class="level2" data-number="5">
+<h2 data-number="5" class="anchored" data-anchor-id="conclusion-gains-concrets-et-compromis"><span class="header-section-number">5</span> Conclusion : gains concrets et compromis</h2>
+<p><strong>Gains</strong> : pas de GeoTIFF annuel obligatoire sur le chemin Parquet ; Parquet columnar + Snappy pour l’outil analytique ; charge CPU portée par OpenMP dans le natif ; empreinte mémoire Python stable.</p>
+<p><strong>Compromis</strong> : protocole ad hoc (pas Arrow IPC ni gRPC) ; <code>flush</code> par jour ; lignes Parquet très « larges » (listes de millions d’entiers) peu adaptées à du SQL naïf sans transformation ; couplage version binaire / lecteur Python.</p>
+<p>Le dépôt complet, scripts et calculateur, est sur GitHub : <a href="https://github.com/NCSdecoopman/SunCast">https://github.com/NCSdecoopman/SunCast</a>. Une présentation plus large du projet est aussi disponible dans la section <a href="../reports/suncast.html">projets</a>.</p>
+</section>
+<section id="références-et-lectures-complémentaires" class="level2" data-number="6">
+<h2 data-number="6" class="anchored" data-anchor-id="références-et-lectures-complémentaires"><span class="header-section-number">6</span> Références et lectures complémentaires</h2>
+<ol type="1">
+<li><strong>GDAL/OGR project.</strong> <em>Raster I/O tutorial</em> : lecture MNT, géotransform, bonnes pratiques d’écriture GeoTIFF (compression, tuiles, BigTIFF).</li>
+<li><strong>Apache Arrow / PyArrow.</strong> <em>Parquet file format</em> : schémas, <code>ParquetWriter</code>, <code>RecordBatch</code>, compression Snappy.</li>
+<li><strong>Python Software Foundation.</strong> <em>subprocess</em> : <code>Popen</code>, pipes, gestion de stdout/stderr en production.</li>
+<li><strong>OpenMP ARB.</strong> <em>OpenMP Application Programming Interface</em> : parallélisation de boucles sur données raster en mémoire.</li>
+</ol>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copié");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copié");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
